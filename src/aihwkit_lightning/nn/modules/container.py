@@ -14,54 +14,18 @@
 
 # pylint: disable=unused-argument, arguments-differ
 from types import new_class
-from typing import Any, Optional, Tuple, Dict, Type
+from typing import Any, Optional, Dict, Type
 from collections import OrderedDict
 
-from torch import Tensor
 from torch.nn import Sequential, Module
 
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
-from aihwkit_lightning.exceptions import ModuleError
 
 
 class AnalogContainerBase(AnalogLayerBase):
     """Base class for analog containers."""
 
     IS_CONTAINER: bool = True
-
-    def get_weights(  # type: ignore
-        self, **kwargs: Any
-    ) -> "OrderedDict[str, Tuple[Tensor, Optional[Tensor]]]":
-        """Returns all weights, bias tuples in an ordered dictionary.
-
-        Args:
-            kwargs: passed to the TileModule ``get_weights`` call
-
-        Returns:
-            All analog weight of all layers
-        """
-
-        weights_dic = OrderedDict()
-        for name, analog_tile in self.named_analog_layers():
-            weights_dic[name] = analog_tile.get_weights(**kwargs)
-        return weights_dic
-
-    def set_weights(  # type: ignore
-        self, weights_dic: "OrderedDict[str, Tuple[Tensor, Optional[Tensor]]]", **kwargs: Any
-    ) -> None:
-        """Set all analog weights part of this parent module.
-
-        Args:
-            weights_dic: Ordered dictionary of weight data
-            kwargs: passed to the TileModule ``set_weights`` call
-
-        Raises:
-            ModuleError: in case tile name cannot be found
-        """
-        for name, analog_tile in self.named_analog_layers():
-            if name not in weights_dic:
-                raise ModuleError("Cannot find tile weight {} in given dictionary.".format(name))
-            analog_tile.set_weights(*weights_dic[name], **kwargs)
 
 
 class AnalogSequential(AnalogContainerBase, Sequential):

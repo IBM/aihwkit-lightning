@@ -73,14 +73,10 @@ class AnalogLayerBase:
                 yield name, layer
 
     @classmethod
-    def move_to_meta(cls, module):
+    def move_to_meta(cls, _):
         """Move the module to the meta class.
 
         This is used to move the module to the meta class. This is
         useful for the conversion of the module to analog.
-
-        Args:
-            module: The module to move to the meta class.
-
         """
         return

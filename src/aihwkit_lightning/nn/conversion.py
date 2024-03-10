@@ -16,7 +16,7 @@ This module includes tools for converting a given torch model to a
 model containing analog layers.
 """
 
-from typing import Optional, Dict, Callable, Set, List
+from typing import Optional, Dict, Callable, Set, List, Union
 from copy import deepcopy
 
 from torch.nn import Module, Linear, Sequential
@@ -26,10 +26,8 @@ from aihwkit_lightning.nn.modules.container import AnalogWrapper
 from aihwkit_lightning.nn import AnalogLinear, AnalogSequential, AnalogLayerBase
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
-_DEFAULT_DIGITAL_CONVERSION_SET = {
-    Linear: AnalogLinear,
-    Sequential: AnalogSequential,
-}
+_DEFAULT_CONVERSION_MAP = {Linear: AnalogLinear, Sequential: AnalogSequential}
+_DEFAULT_DIGITAL_CONVERSION_SET = {*_DEFAULT_CONVERSION_MAP.values()}
 
 
 def specific_rpu_config_id(
@@ -63,7 +61,7 @@ def convert_to_analog(
     exclude_modules: Optional[List[str]] = None,
     inplace: bool = False,
     verbose: bool = False,
-) -> Module:
+) -> Union[Module, AnalogWrapper]:
     """Convert a given digital model to its analog counterpart.
 
     Note:
@@ -77,7 +75,6 @@ def convert_to_analog(
             defined in the ``conversion_map``.
         rpu_config: RPU config to apply to all converted tiles.
             Applied to all converted tiles.
-        tile_module_class: Custom tile module class
         conversion_map: Dictionary of module classes to be replaced in
             case of custom replacement rules. By default all ``Conv`` and ``Linear``
             layers are replaced with their analog counterparts.
@@ -129,7 +126,7 @@ def convert_to_analog(
         module = deepcopy(module)
 
     if conversion_map is None:
-        conversion_map = _DEFAULT_DIGITAL_CONVERSION_SET
+        conversion_map = _DEFAULT_CONVERSION_MAP
 
     if not isinstance(conversion_map, dict):
         raise ArgumentError("Conversion map should be a dictionary")
@@ -141,8 +138,7 @@ def convert_to_analog(
     # Convert parent.
     if module.__class__ in conversion_map and module_name not in exclude_modules:
         maybe_converted_module = conversion_map[module.__class__].from_digital(
-            module,
-            specific_rpu_config_fun(module_name, module, deepcopy(rpu_config))
+            module, specific_rpu_config_fun(module_name, module, deepcopy(rpu_config))
         )
         if verbose:
             print(f"Converted '{module_name}' to '{conversion_map[module.__class__].__name__}'.")
@@ -182,11 +178,16 @@ def convert_to_analog(
         )
 
     for name, new_mod in convert_dic.items():
-        maybe_converted_module._modules[name] = new_mod  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        maybe_converted_module._modules[name] = new_mod  # type: ignore[assignment]
 
     # in case of root, make sure it is wrapped as analog
-    if ensure_analog_root and not module_name and not isinstance(maybe_converted_module, AnalogLayerBase):
-        maybe_converted_module = AnalogWrapper(maybe_converted_module)
+    if (
+        ensure_analog_root
+        and not module_name
+        and not isinstance(maybe_converted_module, AnalogLayerBase)
+    ):
+        return AnalogWrapper(maybe_converted_module)
 
     return maybe_converted_module
 

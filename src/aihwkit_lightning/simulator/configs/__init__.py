@@ -20,8 +20,5 @@ from aihwkit_lightning.simulator.parameters import (
     InputRangeParameter,
     PrePostProcessingParameter,
 )
-from aihwkit_lightning.simulator.parameters.enums import (
-    WeightModifierType,
-    WeightClipType,
-)
+from aihwkit_lightning.simulator.parameters.enums import WeightModifierType, WeightClipType
 from .configs import TorchInferenceRPUConfig

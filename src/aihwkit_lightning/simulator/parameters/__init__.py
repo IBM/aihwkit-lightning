@@ -15,10 +15,7 @@
 # This import is required in order to load the `torch` shared libraries, which
 # the simulator shared library is linked against.
 
-from .enums import (
-    WeightModifierType,
-    WeightClipType,
-)
+from .enums import WeightModifierType, WeightClipType
 
 from .io import IOParameters
 
@@ -26,7 +23,4 @@ from .mapping import MappingParameter
 
 from .pre_post import InputRangeParameter, PrePostProcessingParameter
 
-from .inference import (
-    WeightModifierParameter,
-    WeightClipParameter,
-)
+from .inference import WeightModifierParameter, WeightClipParameter

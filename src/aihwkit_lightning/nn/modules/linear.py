@@ -1,10 +1,25 @@
-from typing import Optional, Tuple, Type
+# -*- coding: utf-8 -*-
+
+# (C) Copyright 2020, 2021, 2022, 2023, 2024 IBM. All Rights Reserved.
+#
+# This code is licensed under the Apache License, Version 2.0. You may
+# obtain a copy of this license in the LICENSE.txt file in the root directory
+# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# Any modifications or derivative works of this code must retain this
+# copyright notice, and modified files need to carry a notice indicating
+# that they have been altered from the originals.
+
+"""Module class for analog linear layer."""
+from typing import Optional, Tuple
 from torch import Tensor
 from torch.nn import Linear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 
+
 class AnalogLinear(Linear, AnalogLayerBase):
+    """Analog linear layer."""
 
     def __init__(
         self,
@@ -13,15 +28,13 @@ class AnalogLinear(Linear, AnalogLayerBase):
         bias: bool = True,
         device=None,
         dtype=None,
-        rpu_config: TorchInferenceRPUConfig = None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ) -> None:
         Linear.__init__(self, in_features, out_features, bias, device, dtype)
         self.rpu_config = rpu_config
-    
+
     @classmethod
-    def from_digital(
-        cls, module: Linear, rpu_config: TorchInferenceRPUConfig, tile_module_class: Optional[Type] = None
-    ) -> "AnalogLinear":
+    def from_digital(cls, module: Linear, rpu_config: TorchInferenceRPUConfig) -> "AnalogLinear":
         """Return an AnalogLinear layer from a torch Linear layer.
 
         Args:
@@ -42,7 +55,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
             rpu_config=rpu_config,
         )
 
-        analog_layer.set_weights(module.weight.data, None if module.bias is None else module.bias.data)
+        analog_layer.set_weights(
+            module.weight.data, None if module.bias is None else module.bias.data
+        )
         return analog_layer
 
     @classmethod
@@ -56,9 +71,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
             module: The module to move to the meta class.
 
         """
-        module.weight = module.weight.to(device="meta")
+        module.weight.data = module.weight.data.to(device="meta")
         if module.bias is not None:
-            module.bias = module.bias.to(device="meta")
+            module.bias.data = module.bias.data.to(device="meta")
 
     def set_weights(self, weight: Tensor, bias: Optional[Tensor] = None) -> None:
         """Set the weight (and bias) tensors to the analog crossbar. Creates a copy of the tensors.
@@ -67,23 +82,20 @@ class AnalogLinear(Linear, AnalogLayerBase):
             weight: the weight tensor
             bias: the bias tensor is available
         """
-        assert self.weight.shape == weight.shape, f"weight shape mismatch. Got {weight.shape}, expected {self.weight.shape}"
-        if bias is not None:
-            assert self.bias.shape == bias.shape, f"bias shape mismatch. Got {bias.shape}, expected {self.bias.shape}"
+        assert (
+            self.weight.shape == weight.shape
+        ), f"weight shape mismatch. Got {weight.shape}, expected {self.weight.shape}"
         self.weight.data = weight.detach().clone()
-        self.bias.data = bias.detach().clone()
+        if bias is not None:
+            assert (
+                self.bias.shape == bias.shape
+            ), f"bias shape mismatch. Got {bias.shape}, expected {self.bias.shape}"
+            self.bias.data = bias.detach().clone()
 
     def get_weights(self) -> Tuple[Tensor, Optional[Tensor]]:
         """Get the weight (and bias) tensors from the analog crossbar.
 
-        Args:
-            **kwargs: see tile level,
-                e.g. :meth:`~aihwkit.simulator.tiles.analog.AnalogTile.get_weights`.
-
         Returns:
             tuple: weight matrix, bias vector
-
-        Raises:
-            ModuleError: if not of type TileModule.
         """
         return (self.weight, self.bias)

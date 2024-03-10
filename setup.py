@@ -22,7 +22,9 @@ INSTALL_REQUIRES = []
 
 def get_version() -> str:
     """Get the package version."""
-    version_path = os.path.join(os.path.dirname(__file__), "src", "aihwkit_lightning", "VERSION.txt")
+    version_path = os.path.join(
+        os.path.dirname(__file__), "src", "aihwkit_lightning", "VERSION.txt"
+    )
     with open(version_path, encoding="utf-8") as version_file:
         return version_file.read().strip()
 

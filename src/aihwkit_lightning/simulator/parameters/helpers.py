@@ -11,18 +11,10 @@
 # that they have been altered from the originals.
 
 """Utilities for resistive processing units configurations."""
-from sys import version_info
 from typing import Any, List
-from dataclasses import Field, fields
+from dataclasses import fields
 from textwrap import indent
 
-if version_info[0] >= 3 and version_info[1] > 7:
-    # pylint: disable=no-name-in-module, ungrouped-imports
-    from typing import get_origin  # type: ignore
-
-    HAS_ORIGIN = True
-else:
-    HAS_ORIGIN = False
 
 FIELD_MAP = {"forward": "forward_io"}
 ALWAYS_INCLUDE = ["forward"]
@@ -94,26 +86,12 @@ class _PrintableMixin:
             suffix = "]" if force_multiline else ""
             return lines_list_to_str(field_lines, prefix, suffix, force_multiline=force_multiline)
 
-        def is_skippable(field: Field, value: Any) -> bool:
-            """Return whether a field should be skipped."""
-            if field.metadata.get("always_show", False):
-                return False
-
-            if value == field.default:
-                # Skip fields with the default value.
-                return True
-
-            if "hide_if" in field.metadata and field.metadata.get("hide_if") == value:
-                return True
-
-            return False
-
         # Main loop.
 
         # Build the list of lines.
         fields_lines = []
 
-        for field in fields(self):
+        for field in fields(self):  # type: ignore[arg-type]
             value = getattr(self, field.name)
 
             # Convert the value into a string, falling back to repr if needed.
