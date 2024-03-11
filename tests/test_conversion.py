@@ -13,10 +13,14 @@
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
 """Test for conversion utility."""
 
+from typing import Union
+from pytest import mark
 from torch import Tensor
+from torch import device as torch_device
 from torch.nn import Module, Linear
 from aihwkit_lightning.nn import AnalogLinear
-from aihwkit_lightning.nn.conversion import convert_to_analog
+from aihwkit_lightning.nn.conversion import AnalogWrapper, convert_to_analog
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 
 class Model(Module):
@@ -42,7 +46,16 @@ class Model(Module):
         return x
 
 
-def test_conversion():
+@mark.parametrize("conversion_map", [None, {}])
+@mark.parametrize("ensure_analog_root", [True, False])
+@mark.parametrize("exclude_modules", [None, "fc2"])
+@mark.parametrize("inplace", [True, False])
+def test_conversion(
+    conversion_map: Union[None, dict],
+    ensure_analog_root: bool,
+    exclude_modules: Union[None, str],
+    inplace: bool,
+):
     """
     Test the correctness of the conversion to analog.
     """
@@ -50,22 +63,29 @@ def test_conversion():
     model = Model()
 
     # Convert the model to analog
+    analog_model: Model
     analog_model = convert_to_analog(
         model,
-        rpu_config=None,
-        conversion_map=None,
-        specific_rpu_config_fun=None,
-        module_name="",
-        ensure_analog_root=True,
-        exclude_modules=None,
-        inplace=False,
-        verbose=False,
+        rpu_config=TorchInferenceRPUConfig(),
+        conversion_map=conversion_map,
+        ensure_analog_root=ensure_analog_root,
+        exclude_modules=exclude_modules,
+        inplace=inplace,
     )
-
-    # Check that the model has been converted to analog
-    assert isinstance(analog_model.fc1, AnalogLinear)
-    assert isinstance(analog_model.fc2, AnalogLinear)
-
-
-if __name__ == "__main__":
-    test_conversion()
+    if inplace and conversion_map != {}:
+        assert isinstance(model.fc1, AnalogLinear)
+    if conversion_map == {}:
+        assert isinstance(analog_model.fc1, Linear)
+        assert isinstance(analog_model.fc2, Linear)
+    if not inplace:
+        assert isinstance(model.fc1, Linear) and model.fc1.weight.device == torch_device("cpu")
+        assert isinstance(model.fc2, Linear) and model.fc2.weight.device == torch_device("cpu")
+    if ensure_analog_root:
+        assert isinstance(analog_model, AnalogWrapper)
+    else:
+        assert not isinstance(analog_model, AnalogWrapper)
+        assert isinstance(analog_model, Model)
+    if exclude_modules == ["fc2"]:
+        assert isinstance(analog_model.fc1, AnalogLinear)
+        assert isinstance(analog_model.fc2, Linear)
+        assert not isinstance(analog_model.fc2, AnalogLinear)

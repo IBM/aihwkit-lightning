@@ -43,6 +43,6 @@ class WeightClipType(Enum):
     """Calculates the second moment of the whole weight matrix and clips
     at ``sigma`` times the result symmetrically around zero."""
 
-    LAYER_GAUSSIAN_PER_CHANNEL = "LayerGaussian"
+    LAYER_GAUSSIAN_PER_CHANNEL = "LayerGaussianPerChannel"
     """Calculates the second moment of the whole weight matrix per output column and clips
     at ``sigma`` times the result symmetrically around zero."""

@@ -71,7 +71,7 @@ class WeightClipParameter(_PrintableMixin):
 
     """
 
-    sigma: float = 2.5
+    sigma: float = -1.0
     """Sigma value for clipping for the ``LayerGaussian`` type."""
 
     type: WeightClipType = field(

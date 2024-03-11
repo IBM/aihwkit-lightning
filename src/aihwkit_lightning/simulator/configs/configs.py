@@ -19,6 +19,8 @@ from aihwkit_lightning.simulator.parameters import (
     IOParameters,
     WeightClipParameter,
     WeightModifierParameter,
+    MappingParameter,
+    PrePostProcessingParameter,
 )
 
 
@@ -66,7 +68,6 @@ class TorchInferenceRPUConfig:
     """
 
     modifier: WeightModifierParameter = field(default_factory=WeightModifierParameter)
-
     """Parameter for weight modifier.
 
     If a modifier type is set, it is called once per mini-match in the
@@ -79,3 +80,9 @@ class TorchInferenceRPUConfig:
     model becomes more noise robust during inference (e.g. when the
     ``noise_model`` is employed).
     """
+
+    mapping: MappingParameter = field(default_factory=MappingParameter)
+    """Parameter related to mapping weights to tiles for supporting modules."""
+
+    pre_post: PrePostProcessingParameter = field(default_factory=PrePostProcessingParameter)
+    """Parameter related digital pre and post processing."""

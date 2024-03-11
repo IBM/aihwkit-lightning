@@ -15,7 +15,6 @@
 """Forward related parameters for resistive processing units."""
 
 from dataclasses import dataclass
-from typing import ClassVar, Type, Optional, Union
 
 from .helpers import _PrintableMixin
 
@@ -29,8 +28,6 @@ class IOParameters(_PrintableMixin):
     scaling, and define the properties of the analog-matvec
     computations, such as noise and non-idealities (e.g. IR-drop).
     """
-
-    bindings_class: ClassVar[Optional[Union[str, Type]]] = "AnalogTileInputOutputParameter"
 
     inp_res: float = 1 / (2**8 - 2)
     r"""Number of discretization steps for DAC (:math:`\le0` means infinite steps)

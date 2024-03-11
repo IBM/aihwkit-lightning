@@ -80,3 +80,7 @@ class AnalogLayerBase:
         useful for the conversion of the module to analog.
         """
         return
+
+    def clip_weights(self) -> None:
+        """Clip the weights of the analog layers."""
+        return

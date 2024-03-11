@@ -14,7 +14,7 @@
 from typing import Optional, Tuple
 from torch import Tensor
 from torch.nn import Linear
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 
 
@@ -30,6 +30,8 @@ class AnalogLinear(Linear, AnalogLayerBase):
         dtype=None,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ) -> None:
+        if rpu_config is None:
+            raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
         Linear.__init__(self, in_features, out_features, bias, device, dtype)
         self.rpu_config = rpu_config
 
@@ -55,7 +57,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
             rpu_config=rpu_config,
         )
 
-        analog_layer.set_weights(
+        analog_layer.set_weights_and_biases(
             module.weight.data, None if module.bias is None else module.bias.data
         )
         return analog_layer
@@ -75,27 +77,51 @@ class AnalogLinear(Linear, AnalogLayerBase):
         if module.bias is not None:
             module.bias.data = module.bias.data.to(device="meta")
 
-    def set_weights(self, weight: Tensor, bias: Optional[Tensor] = None) -> None:
+    def set_weights(self, weight: Tensor) -> None:
+        """Set the weight tensor to the analog crossbar. Creates a copy of the tensors.
+
+        Args:
+            weight: the weight tensor
+        """
+        assert (
+            self.weight.shape == weight.shape
+        ), f"weight shape mismatch. Got {weight.shape}, expected {self.weight.shape}"
+        self.weight.data = weight.detach().clone()
+
+    def set_weights_and_biases(self, weight: Tensor, bias: Optional[Tensor] = None) -> None:
         """Set the weight (and bias) tensors to the analog crossbar. Creates a copy of the tensors.
 
         Args:
             weight: the weight tensor
             bias: the bias tensor is available
         """
-        assert (
-            self.weight.shape == weight.shape
-        ), f"weight shape mismatch. Got {weight.shape}, expected {self.weight.shape}"
-        self.weight.data = weight.detach().clone()
+        self.set_weights(weight)
         if bias is not None:
             assert (
                 self.bias.shape == bias.shape
             ), f"bias shape mismatch. Got {bias.shape}, expected {self.bias.shape}"
             self.bias.data = bias.detach().clone()
 
-    def get_weights(self) -> Tuple[Tensor, Optional[Tensor]]:
+    def get_weights_and_biases(self) -> Tuple[Tensor, Optional[Tensor]]:
         """Get the weight (and bias) tensors from the analog crossbar.
 
         Returns:
             tuple: weight matrix, bias vector
         """
         return (self.weight, self.bias)
+
+    def clip_weights(self) -> None:
+        """Clip the weights."""
+        clip_type = self.rpu_config.clip.type
+        clip_sigma = self.rpu_config.clip.sigma
+
+        if clip_type == WeightClipType.NONE:
+            return
+        assert clip_sigma > 0, "Clip sigma must be greater than 0"
+        sigma_std = clip_sigma * self.weight.std(
+            None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
+        )
+        if clip_type in [WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL]:
+            self.weight.data = self.weight.data.clamp(-sigma_std, sigma_std)
+        else:
+            raise ValueError(f"Unknown clip type {clip_type}")
