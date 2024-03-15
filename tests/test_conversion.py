@@ -13,14 +13,17 @@
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
 """Test for conversion utility."""
 
+import tempfile
 from typing import Union
 from pytest import mark
-from torch import Tensor
+from torch import Tensor, randn, allclose, save, load
 from torch import device as torch_device
 from torch.nn import Module, Linear
+from torch.optim import AdamW
 from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.nn.conversion import AnalogWrapper, convert_to_analog
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
+from aihwkit_lightning.optim import AnalogOptimizer
 
 
 class Model(Module):
@@ -89,3 +92,68 @@ def test_conversion(
         assert isinstance(analog_model.fc1, AnalogLinear)
         assert isinstance(analog_model.fc2, Linear)
         assert not isinstance(analog_model.fc2, AnalogLinear)
+
+
+def test_optimizer_state():
+    """Test loading the optimizer state and compare to torch"""
+    rpu_config = TorchInferenceRPUConfig()
+    inp = randn(10)
+
+    model = Model()
+    model_sd = model.state_dict()
+
+    # convert the model to analog and load the state dict (not even necessary
+    # but nice to check)
+    analog_model = convert_to_analog(model, rpu_config=rpu_config)
+    analog_model.load_state_dict(model_sd)
+
+    # create an analog optimizer
+    optim = AnalogOptimizer(AdamW, analog_model.analog_layers(), analog_model.parameters(), lr=0.01)
+    loss = analog_model(inp).sum()
+    loss.backward()
+    optim.step()
+
+    # create a normal optimizer
+    normal_optim = AdamW(model.parameters(), lr=0.01)
+    normal_loss = model(inp).sum()
+    normal_loss.backward()
+    normal_optim.step()
+
+    allclose(
+        optim.state_dict()["state"][0]["exp_avg"],
+        normal_optim.state_dict()["state"][0]["exp_avg"],
+        atol=1e-5,
+    )
+
+
+def test_save_and_load_state():
+    """Test saving and loading the state dict."""
+    rpu_config = TorchInferenceRPUConfig()
+
+    model = Model()
+    model_sd = model.state_dict()
+
+    analog_model = convert_to_analog(model, rpu_config=rpu_config)
+
+    # FP -> Analog
+    analog_model.load_state_dict(model_sd)
+
+    # Analog -> Analog
+    analog_sd = analog_model.state_dict()
+    analog_model.load_state_dict(analog_sd)
+
+    # Create a temporary file
+    with tempfile.TemporaryFile() as tmp:
+        # Save the model to the temporary file
+        save(analog_model.state_dict(), tmp)
+
+        # To read the data back, you need to seek back to the start of the file
+        tmp.seek(0)
+
+        # Load the model state dict from the temporary file
+        loaded_state_dict = load(tmp)
+
+    analog_model.load_state_dict(loaded_state_dict)
+
+    # we can even load the analog state dict into the non-analog model
+    model.load_state_dict(analog_model.state_dict())

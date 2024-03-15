@@ -29,7 +29,7 @@ class IOParameters(_PrintableMixin):
     computations, such as noise and non-idealities (e.g. IR-drop).
     """
 
-    inp_res: float = 1 / (2**8 - 2)
+    inp_res: float = -1
     r"""Number of discretization steps for DAC (:math:`\le0` means infinite steps)
     or resolution (1/steps)."""
 

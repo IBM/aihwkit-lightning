@@ -14,15 +14,16 @@
 """Test the speed."""
 
 import os
-from pytest import mark
 from unittest import SkipTest
+from pytest import mark
 
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch import cuda as torch_cuda
-from torch import randn, float32, float16, bfloat16, Tensor, compile
+from torch import randn, float32, float16, bfloat16, Tensor
+from torch import compile as torch_compile
 
-from aihwkit_lightning.nn import AnalogLinear as AnalogLinear
+from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 
 
@@ -42,7 +43,7 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("ir_init_std_alpha", [2.0])
 @mark.parametrize("device", ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16])
-def test_torch_compile(
+def test_torch_compile(  # pylint: disable=too-many-arguments
     is_test: bool,
     inp_size: int,
     out_size: int,
@@ -79,18 +80,16 @@ def test_torch_compile(
         return rpu_config
 
     rpu = populate_rpu(RPUConfig())
-    linear = AnalogLinear(
-        in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu
-    )
+    linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
     if is_test:
         linear = linear.eval()
     linear = linear.to(device=device, dtype=dtype)
-    compiled_linear = compile(linear)
+    compiled_linear = torch_compile(linear)
     inp = randn(inp_size, device=device, dtype=dtype)
-    linear(inp)
+    linear(inp)  # pylint: disable=not-callable
     compiled_linear(inp)
 
-    @compile
+    @torch_compile
     def forward_backward(model: AnalogLinear, inp: Tensor):
         out = model(inp)
         out.sum().backward()

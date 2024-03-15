@@ -326,3 +326,17 @@ class AnalogLinear(Linear, AnalogLayerBase):
             self.weight.data = self.weight.data.clamp(-sigma_std, sigma_std)
         else:
             raise ValueError(f"Unknown clip type {clip_type}")
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        # pylint: disable=protected-access
+        destination._metadata[prefix.split(".")[0]]["rpu_config"] = self.rpu_config
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
+        if "rpu_config" in local_metadata:
+            self.rpu_config = local_metadata["rpu_config"]
