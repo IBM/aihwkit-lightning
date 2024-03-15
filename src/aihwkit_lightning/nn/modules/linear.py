@@ -14,10 +14,11 @@
 from typing import Optional, Tuple, List
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
-from torch import Tensor, empty, zeros, zeros_like, clamp
+from torch import Tensor, empty, zeros, zeros_like, clamp, randn_like
 from torch.nn import Linear, Parameter
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType, WeightModifierType
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
+from aihwkit_lightning.exceptions import ConfigError
 
 
 class UniformQuantize(Function):
@@ -26,13 +27,14 @@ class UniformQuantize(Function):
     # pylint: disable=abstract-method, redefined-builtin, arguments-differ
 
     @staticmethod
-    def forward(ctx: FunctionCtx, inp: Tensor, res: float) -> Tensor:
+    def forward(ctx: FunctionCtx, inp: Tensor, res: float, inplace: bool) -> Tensor:
         """Quantizes the input tensor and performs straight-through estimation.
 
         Args:
             ctx (FunctionCtx): Context.
             inp (torch.Tensor): Input to be discretized.
             res (float): Resolution (number of states).
+            inplace (bool): Clone the input?
 
         Returns:
             torch.Tensor: Quantized input.
@@ -40,7 +42,7 @@ class UniformQuantize(Function):
         # - Compute 1 / states if the number of states are provided
         res = 2 / res if res > 1.0 else 2 * res
         assert res > 0, "resolution is <= 0"
-        output = inp.clone()
+        output = inp if inplace else inp.clone()
         output = output / res
         # - Perform explicit rounding
         output = output.round()
@@ -50,7 +52,7 @@ class UniformQuantize(Function):
 
     @staticmethod
     # type: ignore[override]
-    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, None, None]:
+    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, None, None, None]:
         """Straight-through estimator.
 
         Args:
@@ -62,7 +64,7 @@ class UniformQuantize(Function):
         """
         # - Straight-through estimator
         grad_input = grad_output
-        return grad_input, None, None
+        return grad_input, None, None, None
 
 
 class InputRangeForward(Function):
@@ -149,7 +151,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
     def forward(self, inp: Tensor) -> Tensor:  # pylint: disable=arguments-renamed
         """Forward function."""
 
-        # maybe apply the weight modifier
+        modified_weights = self.weight
+        if self.rpu_config.modifier.type != WeightModifierType.NONE:
+            modified_weights = self.weight.clone()
 
         current_upper = 0
         out = 0.0
@@ -172,9 +176,10 @@ class AnalogLinear(Linear, AnalogLayerBase):
 
             # maybe do some quantization
             if self.rpu_config.forward.inp_res > 0:
-                inp_slice = UniformQuantize.apply(inp_slice, self.rpu_config.forward.inp_res)
+                inp_slice = UniformQuantize.apply(inp_slice, self.rpu_config.forward.inp_res, False)
 
-            out_slice = inp_slice @ self.weight[:, current_upper : current_upper + inp_size].T
+            modified_slice = self.modify_weight(modified_weights[:, current_upper : current_upper + inp_size])
+            out_slice = inp_slice @ modified_slice.T
 
             # maybe add some output noise
             # TODO
@@ -235,6 +240,48 @@ class AnalogLinear(Linear, AnalogLayerBase):
         n_splits = (size + split_max_size - 1) // split_max_size
         base, extra = divmod(size, n_splits)
         return [base + (i < extra) for i in range(n_splits)]
+    
+    def modify_weight(self, inp_weight: Tensor) -> Tensor:
+        """Modified weights in-place, so .clone() before if it's not NONE.
+
+        Args:
+            inp_weight: Input weights.
+            modifier: Noise injection configuration.
+
+        Raises:
+            ConfigError: Unsupported/unknown weight modifier type.
+
+        Returns:
+            Weights with noise injected.
+        """
+        modifier = self.rpu_config.modifier
+        if modifier.type == WeightModifierType.NONE:
+            return inp_weight
+        
+        assumed_wmax = inp_weight.abs().max()
+        res = modifier.res
+        n_states = max(res, 1 / res)
+        res = assumed_wmax / n_states
+
+        if modifier.type == WeightModifierType.DISCRETIZE:
+            # - Discretize the weights on the fly and backprob through them
+            inp_weight = UniformQuantize.apply(inp_weight, res, True)
+        elif modifier.type == WeightModifierType.ADD_NORMAL:
+            with no_grad():
+                noise = (
+                    modifier.std_dev * assumed_wmax * randn_like(inp_weight)
+                )
+            inp_weight = inp_weight + noise
+        elif modifier.type == WeightModifierType.DISCRETIZE_ADD_NORMAL:
+            inp_weight = UniformQuantize.apply(inp_weight, res, True)
+            with no_grad():
+                noise = (
+                    modifier.std_dev * assumed_wmax * randn_like(inp_weight)
+                )
+            inp_weight = inp_weight + noise
+        else:
+            raise ConfigError(f"Weight modifier {modifier} not supported")
+        return inp_weight
 
     @classmethod
     def from_digital(cls, module: Linear, rpu_config: TorchInferenceRPUConfig) -> "AnalogLinear":
