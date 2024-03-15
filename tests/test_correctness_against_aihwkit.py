@@ -15,6 +15,7 @@
 
 import os
 from typing import Union
+from unittest import SkipTest
 from pytest import mark
 
 from torch import dtype as torch_dtype
@@ -25,9 +26,9 @@ from torch.optim import AdamW
 
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
-from aihwkit.simulator.configs import NoiseManagementType
+from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
 
-from aihwkit_lightning.nn import AnalogLinear as AnalogLinear
+from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.optim import AnalogOptimizer
 from aihwkit_lightning.simulator.configs import WeightClipType
@@ -37,8 +38,9 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 
 
 @mark.parametrize("bsz", [1, 10])
-@mark.parametrize("inp_size", [10, 255, 512, 513, 1024])
-@mark.parametrize("out_size", [10, 255, 512, 513, 1024])
+@mark.parametrize("num_inp_dims", [1, 2, 3])
+@mark.parametrize("inp_size", [10, 255, 513])
+@mark.parametrize("out_size", [10, 255, 513])
 @mark.parametrize("bias", [True, False])
 @mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
 @mark.parametrize("max_inp_size", [256, 512])
@@ -49,8 +51,9 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
 @mark.parametrize("device", ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16])
-def test_linear_forward(
+def test_linear_forward(  # pylint: disable=too-many-arguments
     bsz: int,
+    num_inp_dims: int,
     inp_size: int,
     out_size: int,
     bias: bool,
@@ -64,24 +67,29 @@ def test_linear_forward(
     device: torch_device,
     dtype: torch_dtype,
 ):
+    """Test the forward pass."""
 
-    device = (
-        torch_device("cpu")
-        if device == "cpu" or SKIP_CUDA_TESTS
-        else torch_device(device)
-    )
+    if device == "cuda" and SKIP_CUDA_TESTS:
+        raise SkipTest("CUDA tests are disabled/ can't be performed")
+
+    if not ir_enable and inp_res > 0:
+        raise SkipTest("IR not enabled but inp_res > 0")
+
+    if num_inp_dims == 1 and bsz > 1:
+        raise SkipTest("1D input but bsz > 1")
 
     def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
         # AIHWKIT-specific configurations
         if isinstance(rpu_config, AIHWKITRPUConfig):
             rpu_config.mapping.max_output_size = -1
             rpu_config.forward.noise_management = (
-                NoiseManagementType.ABS_MAX
-                if not ir_enable
-                else NoiseManagementType.NONE
+                NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
             )
+            rpu_config.forward.bound_management = BoundManagementType.NONE
 
         rpu_config.forward.inp_res = inp_res
+        rpu_config.forward.out_res = -1
+        rpu_config.forward.out_bound = -1
         rpu_config.forward.out_noise = 0.0
         rpu_config.mapping.max_input_size = max_inp_size
         rpu_config.pre_post.input_range.enable = ir_enable
@@ -89,6 +97,7 @@ def test_linear_forward(
         rpu_config.pre_post.input_range.init_value = ir_init_value
         rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
         rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
+        return rpu_config
 
     aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
     rpu = populate_rpu(RPUConfig())
@@ -96,9 +105,7 @@ def test_linear_forward(
     aihwkit_linear = AIHWKITAnalogLinear(
         in_features=inp_size, out_features=out_size, bias=bias, rpu_config=aihwkit_rpu
     )
-    linear = AnalogLinear(
-        in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu
-    )
+    linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
 
     aihwkit_linear = aihwkit_linear.eval()
     linear = linear.eval()
@@ -106,34 +113,34 @@ def test_linear_forward(
     aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
     linear = linear.to(device=device, dtype=dtype)
 
-    inp = randn(bsz, inp_size, device=device, dtype=dtype)
-    out_aihwkit = aihwkit_linear(inp)
-    out = linear(inp)
+    aihwkit_weight, aihwkit_bias = aihwkit_linear.get_weights()
+    linear.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+
+    if num_inp_dims == 1:
+        inp = randn(inp_size, device=device, dtype=dtype)
+    if num_inp_dims == 2:
+        inp = randn(bsz, inp_size, device=device, dtype=dtype)
+    else:
+        inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype)
+
+    out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
+    out = linear(inp)  # pylint: disable=not-callable
     assert allclose(out_aihwkit, out, atol=1e-5)
 
 
 @mark.parametrize(
     "clip_type",
-    [
-        WeightClipType.NONE,
-        WeightClipType.LAYER_GAUSSIAN,
-        WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-    ],
+    [WeightClipType.NONE, WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL],
 )
 @mark.parametrize("clip_sigma", [2.0, 3.0])
 @mark.parametrize("device", ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16])
 def test_clipping(
-    clip_type: WeightClipType,
-    clip_sigma: float,
-    device: torch_device,
-    dtype: torch_dtype,
+    clip_type: WeightClipType, clip_sigma: float, device: torch_device, dtype: torch_dtype
 ):
-    device = (
-        torch_device("cpu")
-        if device == "cpu" or SKIP_CUDA_TESTS
-        else torch_device(device)
-    )
+    """Test the clipping."""
+
+    device = torch_device("cpu") if device == "cpu" or SKIP_CUDA_TESTS else torch_device(device)
 
     rpu_config = RPUConfig()
     rpu_config.clip.type = clip_type
@@ -144,7 +151,7 @@ def test_clipping(
     model.set_weights(weights)  # note that this performs a clone internally
     optim = AnalogOptimizer(AdamW, model.analog_layers(), model.parameters(), lr=0.0)
     loss: Tensor
-    loss = model(randn(10, 10, device=device, dtype=dtype)).sum()
+    loss = model(randn(10, 10, device=device, dtype=dtype)).sum()  # pylint: disable=not-callable
     loss.backward()
     # actually not doing an update, but just clipping
     optim.step()
@@ -160,5 +167,95 @@ def test_clipping(
         raise ValueError(f"Unknown clip type {clip_type}")
 
 
-def test_input_range_backward():
-    pass
+@mark.parametrize("bsz", [1, 10])
+@mark.parametrize("num_inp_dims", [1, 2, 3])
+@mark.parametrize("inp_size", [10, 255, 513])
+@mark.parametrize("out_size", [10, 255, 513])
+@mark.parametrize("bias", [True, False])
+@mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
+@mark.parametrize("max_inp_size", [256, 512])
+@mark.parametrize("ir_init_value", [2.0, 3.0])
+@mark.parametrize("ir_init_from_data", [-1, 0, 10])
+@mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
+@mark.parametrize("device", ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16])
+def test_input_range_backward(  # pylint: disable=too-many-arguments
+    bsz: int,
+    num_inp_dims: int,
+    inp_size: int,
+    out_size: int,
+    bias: bool,
+    inp_res: float,
+    max_inp_size: int,
+    ir_init_value: float,
+    ir_init_from_data: int,
+    ir_init_std_alpha: float,
+    device: torch_device,
+    dtype: torch_dtype,
+):
+    """Test the input range backward pass."""
+
+    if device == "cuda" and SKIP_CUDA_TESTS:
+        raise SkipTest("CUDA tests are disabled/ can't be performed")
+
+    if num_inp_dims == 1 and bsz > 1:
+        raise SkipTest("1D input but bsz > 1")
+
+    def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
+        # AIHWKIT-specific configurations
+        if isinstance(rpu_config, AIHWKITRPUConfig):
+            rpu_config.mapping.max_output_size = -1
+            rpu_config.forward.noise_management = NoiseManagementType.NONE
+            rpu_config.forward.bound_management = BoundManagementType.NONE
+
+        rpu_config.forward.inp_res = inp_res
+        rpu_config.forward.out_res = -1
+        rpu_config.forward.out_bound = -1
+        rpu_config.forward.out_noise = 0.0
+        rpu_config.mapping.max_input_size = max_inp_size
+        rpu_config.pre_post.input_range.enable = True
+        rpu_config.pre_post.input_range.learn_input_range = True
+        rpu_config.pre_post.input_range.init_value = ir_init_value
+        rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
+        rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
+        return rpu_config
+
+    aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
+    rpu = populate_rpu(RPUConfig())
+
+    aihwkit_linear = AIHWKITAnalogLinear(
+        in_features=inp_size, out_features=out_size, bias=bias, rpu_config=aihwkit_rpu
+    )
+    linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
+
+    aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
+    linear = linear.to(device=device, dtype=dtype)
+
+    aihwkit_weights, aihwkit_biases = aihwkit_linear.get_weights()
+    linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
+
+    if num_inp_dims == 1:
+        inp = randn(inp_size, device=device, dtype=dtype)
+    if num_inp_dims == 2:
+        inp = randn(bsz, inp_size, device=device, dtype=dtype)
+    else:
+        inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype)
+
+    out_aihwkit: Tensor
+    out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
+
+    out: Tensor
+    out = linear(inp)  # pylint: disable=not-callable
+
+    out_aihwkit.sum().backward()
+    out.sum().backward()
+
+    assert allclose(out_aihwkit, out, atol=1e-5)
+
+    for tile_idx, tiles in enumerate(aihwkit_linear.analog_module.array):
+        assert len(tiles) == 1, "Output size must be inf"
+        tile = tiles[0]
+        input_range = tile.input_range
+        assert allclose(
+            input_range.grad, linear.input_range.grad[tile_idx], atol=1e-5
+        ), f"AIHWKIT: {input_range.grad} lightning: {linear.input_range.grad[tile_idx]}"

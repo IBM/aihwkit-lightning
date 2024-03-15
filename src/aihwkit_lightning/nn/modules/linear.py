@@ -11,11 +11,107 @@
 # that they have been altered from the originals.
 
 """Module class for analog linear layer."""
-from typing import Optional, Tuple
-from torch import Tensor
-from torch.nn import Linear
+from typing import Optional, Tuple, List
+from torch.autograd import no_grad, Function
+from torch.autograd.function import FunctionCtx
+from torch import Tensor, empty, zeros, zeros_like, clamp
+from torch.nn import Linear, Parameter
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
+
+
+class UniformQuantize(Function):
+    """Quantization function."""
+
+    # pylint: disable=abstract-method, redefined-builtin, arguments-differ
+
+    @staticmethod
+    def forward(ctx: FunctionCtx, inp: Tensor, res: float) -> Tensor:
+        """Quantizes the input tensor and performs straight-through estimation.
+
+        Args:
+            ctx (FunctionCtx): Context.
+            inp (torch.Tensor): Input to be discretized.
+            res (float): Resolution (number of states).
+
+        Returns:
+            torch.Tensor: Quantized input.
+        """
+        # - Compute 1 / states if the number of states are provided
+        res = 2 / res if res > 1.0 else 2 * res
+        assert res > 0, "resolution is <= 0"
+        output = inp.clone()
+        output = output / res
+        # - Perform explicit rounding
+        output = output.round()
+        # - Scale back down
+        output *= res
+        return output
+
+    @staticmethod
+    # type: ignore[override]
+    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, None, None]:
+        """Straight-through estimator.
+
+        Args:
+            ctx: Context.
+            grad_output: Gradient w.r.t. the inputs.
+
+        Returns:
+            Gradients w.r.t. inputs to forward.
+        """
+        # - Straight-through estimator
+        grad_input = grad_output
+        return grad_input, None, None
+
+
+class InputRangeForward(Function):
+    """
+    Enable custom input range gradient computation using torch's autograd.
+    """
+
+    # pylint: disable=abstract-method, redefined-builtin, arguments-differ
+
+    @staticmethod
+    def forward(
+        ctx: FunctionCtx,
+        x_input: Tensor,
+        input_range: Tensor,
+        decay: float,
+        input_min_percentage: float,
+    ) -> Tensor:
+        ctx.save_for_backward(x_input, input_range)
+        ctx.decay = decay  # type: ignore[attr-defined]
+        ctx.input_min_percentage = input_min_percentage  # type: ignore[attr-defined]
+        return x_input
+
+    @staticmethod
+    # type: ignore[override]
+    def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, Tensor, None, None]:
+
+        x_input: Tensor
+        input_range: Tensor
+
+        x_input, input_range = ctx.saved_tensors  # type: ignore[attr-defined]
+        ir_grad = None
+
+        if input_range is not None:
+            decay = ctx.decay  # type: ignore[attr-defined]
+            input_min_percentage = ctx.input_min_percentage  # type: ignore[attr-defined]
+
+            upper_thres = x_input >= input_range  # pylint: disable=invalid-unary-operand-type
+            lower_thres = x_input <= -input_range  # pylint: disable=invalid-unary-operand-type
+            ir_grad = zeros_like(input_range)
+            ir_grad += clamp(upper_thres * d_output, min=None, max=0.0).sum()
+            ir_grad -= clamp(lower_thres * d_output, min=0.0, max=None).sum()
+            ir_grad *= input_range
+            if decay > 0:
+                # - We shrink the input range if less than X% of the inputs are clipping.
+                # where X is 1-ir_params.input_min_percentage
+                percentage = (x_input.abs() < input_range).float().mean()
+                ir_grad += decay * input_range * (percentage > input_min_percentage)
+
+        return d_output, ir_grad, None, None
 
 
 class AnalogLinear(Linear, AnalogLayerBase):
@@ -34,6 +130,111 @@ class AnalogLinear(Linear, AnalogLayerBase):
             raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
         Linear.__init__(self, in_features, out_features, bias, device, dtype)
         self.rpu_config = rpu_config
+
+        max_input_size = rpu_config.mapping.max_input_size
+        self.in_sizes = self.get_split_sizes(in_features, max_input_size)
+
+        if rpu_config.pre_post.input_range.enable:
+            # for every vertical tile, we have an input range
+            self.input_range = Parameter(
+                data=empty((len(self.in_sizes),), dtype=dtype, device=device).fill_(
+                    rpu_config.pre_post.input_range.init_value
+                ),
+                requires_grad=rpu_config.pre_post.input_range.learn_input_range,
+            )
+            self.input_range_update_idx = Parameter(
+                data=zeros((len(self.in_sizes),), dtype=dtype, device=device), requires_grad=False
+            )
+
+    def forward(self, inp: Tensor) -> Tensor:  # pylint: disable=arguments-renamed
+        """Forward function."""
+
+        # maybe apply the weight modifier
+
+        current_upper = 0
+        out = 0.0
+        for slice_idx, inp_size in enumerate(self.in_sizes):
+            inp_slice = inp[..., current_upper : current_upper + inp_size]  # noqa: E203
+
+            if self.rpu_config.pre_post.input_range.enable:
+                with no_grad():
+                    inp_slice = self.apply_input_range(
+                        values=inp_slice, slice_idx=slice_idx, update_from_data=self.training
+                    )
+
+                inp_slice = InputRangeForward.apply(
+                    inp_slice,
+                    self.input_range[slice_idx],
+                    self.rpu_config.pre_post.input_range.decay,
+                    self.rpu_config.pre_post.input_range.input_min_percentage,
+                )
+                inp_slice = inp_slice / self.input_range[slice_idx]
+
+            # maybe do some quantization
+            if self.rpu_config.forward.inp_res > 0:
+                inp_slice = UniformQuantize.apply(inp_slice, self.rpu_config.forward.inp_res)
+
+            out_slice = inp_slice @ self.weight[:, current_upper : current_upper + inp_size].T
+
+            # maybe add some output noise
+            # TODO
+
+            if self.rpu_config.pre_post.input_range.enable:
+                out_slice *= self.input_range[slice_idx]
+
+            out += out_slice  # type: ignore[assignment]
+
+            current_upper += inp_size
+
+        return out + self.bias if self.bias is not None else out
+
+    def apply_input_range(
+        self, values: Tensor, slice_idx: int, update_from_data: bool = False
+    ) -> Tensor:
+        """Apply the input clipping.
+
+        Args:
+            values: tensor to clip
+            slice_idx: index of the input slice
+            update_from_data: whether to update from data if applicable
+
+        Returns:
+            clipped output tensor
+        """
+
+        if not self.rpu_config.pre_post.input_range.enable:
+            return values
+
+        if update_from_data:
+            ir_params = self.rpu_config.pre_post.input_range
+            idx = self.input_range_update_idx[slice_idx]
+            if idx < ir_params.init_from_data:
+                std = values.std()
+                if std > 0.0:
+                    self.input_range.data[slice_idx] = (
+                        self.input_range.data[slice_idx] * idx + ir_params.init_std_alpha * std
+                    ) / (idx + 1)
+                    self.input_range_update_idx[slice_idx] += 1
+                self.input_range.data[slice_idx] = self.input_range.data[slice_idx].abs()
+
+        return clamp(values, min=-self.input_range[slice_idx], max=self.input_range[slice_idx])
+
+    def get_split_sizes(self, size: int, split_max_size: int) -> List[int]:
+        """Computed the split sizes.
+
+        Args:
+            size: number of elements of the layer in one dimension
+            split_max_size: max size of the split
+
+        Returns:
+            List of split sizes
+        """
+        if split_max_size <= 0:
+            return [size]
+
+        n_splits = (size + split_max_size - 1) // split_max_size
+        base, extra = divmod(size, n_splits)
+        return [base + (i < extra) for i in range(n_splits)]
 
     @classmethod
     def from_digital(cls, module: Linear, rpu_config: TorchInferenceRPUConfig) -> "AnalogLinear":

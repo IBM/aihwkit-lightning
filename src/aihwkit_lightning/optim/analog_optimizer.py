@@ -63,9 +63,7 @@ class AnalogOptimizer(Optimizer):
         # `AnalogOptimizer` and for the specific torch optimizer
         # (`optimizer_cls`).
         if subclass_name not in cls.SUBCLASSES:
-            cls.SUBCLASSES[subclass_name] = new_class(
-                subclass_name, (cls, optimizer_cls), {}
-            )
+            cls.SUBCLASSES[subclass_name] = new_class(subclass_name, (cls, optimizer_cls), {})
 
         return super().__new__(cls.SUBCLASSES[subclass_name])
 
@@ -75,13 +73,13 @@ class AnalogOptimizer(Optimizer):
         _: Type,
         analog_layers: Generator[AnalogLayerBase, None, None],
         *args: Any,
-        **kwargs: Any
+        **kwargs: Any,
     ):
         super().__init__(*args, **kwargs)
 
         def hook(*_: Any, **__: Any):
             for analog_layer in analog_layers:
-                analog_layer: AnalogLayerBase # type: ignore[no-redef]
+                analog_layer: AnalogLayerBase  # type: ignore[no-redef]
                 analog_layer.clip_weights()
 
         self.register_step_post_hook(hook)
