@@ -16,7 +16,11 @@ from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
 from torch import Tensor, empty, zeros, zeros_like, clamp, randn_like
 from torch.nn import Linear, Parameter
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType, WeightModifierType
+from aihwkit_lightning.simulator.configs import (
+    TorchInferenceRPUConfig,
+    WeightClipType,
+    WeightModifierType,
+)
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.exceptions import ConfigError
 
@@ -178,7 +182,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
             if self.rpu_config.forward.inp_res > 0:
                 inp_slice = UniformQuantize.apply(inp_slice, self.rpu_config.forward.inp_res, False)
 
-            modified_slice = self.modify_weight(modified_weights[:, current_upper : current_upper + inp_size])
+            modified_slice = self.modify_weight(
+                modified_weights[:, current_upper : current_upper + inp_size]
+            )
             out_slice = inp_slice @ modified_slice.T
 
             # maybe add some output noise
@@ -240,13 +246,12 @@ class AnalogLinear(Linear, AnalogLayerBase):
         n_splits = (size + split_max_size - 1) // split_max_size
         base, extra = divmod(size, n_splits)
         return [base + (i < extra) for i in range(n_splits)]
-    
+
     def modify_weight(self, inp_weight: Tensor) -> Tensor:
         """Modified weights in-place, so .clone() before if it's not NONE.
 
         Args:
             inp_weight: Input weights.
-            modifier: Noise injection configuration.
 
         Raises:
             ConfigError: Unsupported/unknown weight modifier type.
@@ -257,7 +262,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
         modifier = self.rpu_config.modifier
         if modifier.type == WeightModifierType.NONE:
             return inp_weight
-        
+
         assumed_wmax = inp_weight.abs().max()
         res = modifier.res
         n_states = max(res, 1 / res)
@@ -268,16 +273,12 @@ class AnalogLinear(Linear, AnalogLayerBase):
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
         elif modifier.type == WeightModifierType.ADD_NORMAL:
             with no_grad():
-                noise = (
-                    modifier.std_dev * assumed_wmax * randn_like(inp_weight)
-                )
+                noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
         elif modifier.type == WeightModifierType.DISCRETIZE_ADD_NORMAL:
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
             with no_grad():
-                noise = (
-                    modifier.std_dev * assumed_wmax * randn_like(inp_weight)
-                )
+                noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
         else:
             raise ConfigError(f"Weight modifier {modifier} not supported")

@@ -21,7 +21,17 @@ from pytest import mark
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch import cuda as torch_cuda
-from torch import allclose, randn, randn_like, float32, float16, bfloat16, Tensor, matmul, manual_seed
+from torch import (
+    allclose,
+    randn,
+    randn_like,
+    float32,
+    float16,
+    bfloat16,
+    Tensor,
+    matmul,
+    manual_seed,
+)
 from torch.optim import AdamW
 
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
@@ -261,17 +271,30 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
         ), f"AIHWKIT: {input_range.grad} lightning: {linear.input_range.grad[tile_idx]}"
 
 
-@mark.parametrize("modifier_type", [WeightModifierType.DISCRETIZE, WeightModifierType.NONE, WeightModifierType.ADD_NORMAL, WeightModifierType.DISCRETIZE_ADD_NORMAL])
+@mark.parametrize(
+    "modifier_type",
+    [
+        WeightModifierType.DISCRETIZE,
+        WeightModifierType.NONE,
+        WeightModifierType.ADD_NORMAL,
+        WeightModifierType.DISCRETIZE_ADD_NORMAL,
+    ],
+)
 @mark.parametrize("res", [2**5 - 2, 1 / (2**5 - 2)])
 @mark.parametrize("device", ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16])
-def test_weight_modifier(modifier_type: WeightModifierType, res: float, device: str, dtype: torch_dtype):
+def test_weight_modifier(
+    modifier_type: WeightModifierType, res: float, device: str, dtype: torch_dtype
+):
     """Test the weight modifier."""
 
     if device == "cuda" and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")
-    
-    if res > 0 and not modifier_type in [WeightModifierType.DISCRETIZE, WeightModifierType.DISCRETIZE_ADD_NORMAL]:
+
+    if res > 0 and modifier_type not in [
+        WeightModifierType.DISCRETIZE,
+        WeightModifierType.DISCRETIZE_ADD_NORMAL,
+    ]:
         raise SkipTest("res but modifier is not discretize")
 
     manual_seed(0)
@@ -281,25 +304,20 @@ def test_weight_modifier(modifier_type: WeightModifierType, res: float, device: 
     rpu_config.modifier.res = res
     rpu_config.modifier.std_dev = 0.05
 
-    model = AnalogLinear(
-        in_features=in_size,
-        out_features=1,
-        rpu_config=rpu_config,
-        bias=False
-    )
+    model = AnalogLinear(in_features=in_size, out_features=1, rpu_config=rpu_config, bias=False)
     model = model.to(device=device, dtype=dtype)
 
     weights = randn_like(model.weight, device=device)
     model.set_weights(weights)  # note that this performs a clone internally
     inp = randn(10, in_size, device=device, dtype=dtype)
-    
+
     manual_seed(0)
-    out = model(inp)
+    out = model(inp)  # pylint: disable=not-callable
 
     assumed_wmax = weights.abs().max()
     if modifier_type in [WeightModifierType.DISCRETIZE, WeightModifierType.DISCRETIZE_ADD_NORMAL]:
         res = rpu_config.modifier.res
-        n_states = res / 2 if res > 1.0 else 1 / (2*res)
+        n_states = res / 2 if res > 1.0 else 1 / (2 * res)
         res = (1 / n_states) * assumed_wmax
         quantized_weights = (weights / res).round()
         quantized_weights *= res
@@ -308,13 +326,12 @@ def test_weight_modifier(modifier_type: WeightModifierType, res: float, device: 
 
     manual_seed(0)
     if modifier_type in [WeightModifierType.ADD_NORMAL, WeightModifierType.DISCRETIZE_ADD_NORMAL]:
-        noise = rpu_config.modifier.std_dev * assumed_wmax * randn_like(quantized_weights, device=device, dtype=dtype)
+        noise = (
+            rpu_config.modifier.std_dev
+            * assumed_wmax
+            * randn_like(quantized_weights, device=device, dtype=dtype)
+        )
         quantized_weights += noise
-    out_expected =  matmul(inp, quantized_weights.T)
+    out_expected = matmul(inp, quantized_weights.T)
 
     assert allclose(out, out_expected, atol=1e-5)
-
-
-    
-if __name__ == "__main__":
-    test_weight_modifier(modifier_type=WeightModifierType.DISCRETIZE_ADD_NORMAL, res=1 / (2**4-2), device="cpu", dtype=float32)
