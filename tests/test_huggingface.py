@@ -14,7 +14,7 @@
 """Test huggingface compatibility."""
 
 import tempfile
-from torch import argmax
+import numpy as np
 from torch.optim import AdamW
 from transformers import (
     RobertaTokenizer,
@@ -111,13 +111,14 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
             greater_is_better=True,
             fp16=use_fp16,
             fp16_full_eval=use_fp16,
-            torch_compile=True,
+            half_precision_backend="apex",
+            torch_compile=False,
         )
 
         def compute_metrics(eval_pred):
             predictions, labels = eval_pred
             if task_name != "stsb":
-                predictions = argmax(predictions, axis=1)
+                predictions = np.argmax(predictions, axis=1)
             else:
                 predictions = predictions[:, 0]
             return metric.compute(predictions=predictions, references=labels)
@@ -151,4 +152,4 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
 
 
 if __name__ == "__main__":
-    training_huggingface(use_normal_torch=False, use_fp16=False)
+    training_huggingface(use_normal_torch=True, use_fp16=False)
