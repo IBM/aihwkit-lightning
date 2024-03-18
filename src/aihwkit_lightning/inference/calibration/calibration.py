@@ -12,23 +12,24 @@
 
 """Calibration for inference."""
 
-from typing import Optional, Dict, Tuple, TYPE_CHECKING
+from typing import Optional, Dict, Tuple, List
+from copy import deepcopy
 from collections.abc import Iterator
 from functools import partial
 from enum import Enum
 
 from tqdm import tqdm
 
-from torch import tensor, Tensor, cat, randperm, no_grad
-from torch.nn import Module
+from torch import tensor, Tensor, cat, randperm, no_grad, empty, zeros, full, int32
+from torch.nn import Parameter
 from torch.nn.modules.module import RemovableHandle
 
-from aihwkit_lightning.exceptions import ConfigError, ArgumentError
-from aihwkit_lightning.simulator.parameters.pre_post import PrePostProcessingRPU
+from aihwkit_lightning.exceptions import ConfigError
+from aihwkit_lightning.simulator.configs import WeightModifierType
 from aihwkit_lightning.nn import AnalogLinear
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
-if TYPE_CHECKING:
-    from aihwkit_lightning.simulator.parameters import IOParameters
+# mypy: disable-error-code="attr-defined"
 
 
 class InputRangeCalibrationType(Enum):
@@ -56,6 +57,7 @@ class InputRangeCalibrationType(Enum):
 def _calibration_pre_forward(
     mod: AnalogLinear,
     input_args: Tuple,
+    input_kwargs: Dict,
     calibration_type: InputRangeCalibrationType,
     cache_key: str,
     global_cache: Dict[str, Tensor],
@@ -70,8 +72,74 @@ def _calibration_pre_forward(
         cache_key: key of global cache
         max_samples: Maximal number of cache samples
     """
+    # pylint: disable=too-many-locals
 
-    raise NotImplementedError("This function is not yet implemented.")
+    # get rid of entries that are all-zeros
+    x_input: Tensor
+    x_input = input_args[0] if len(input_args) > 0 else input_kwargs["inp"]
+    x_input = x_input.reshape(-1, x_input.size(-1))
+    x_input = x_input[~(x_input == 0.0).all(-1)]
+
+    ir_params = mod.rpu_config.pre_post.input_range  # type: ignore
+    cache = global_cache[cache_key]
+    if calibration_type in [
+        InputRangeCalibrationType.CACHE_QUANTILE,
+        InputRangeCalibrationType.MAX,
+    ]:
+        # We need to cache the inputs
+        # Add new samples to the cache
+        if calibration_type in [InputRangeCalibrationType.CACHE_QUANTILE]:
+            cache = cat(
+                [cache, x_input.float().reshape(-1, x_input.size(-1)).clone().detach().cpu()]
+            )
+            # Shuffle and limit the number
+            cache = cache[randperm(cache.size(0))[:max_samples]]
+        else:
+            if cache.numel() == 0:
+                cache = full(
+                    (len(mod.in_sizes),),
+                    fill_value=float("-Inf"),
+                    dtype=x_input.dtype,
+                    device="cpu",
+                )
+
+            current_upper = 0
+            for slice_idx, inp_size in enumerate(mod.in_sizes):
+                inp_slice = x_input[..., current_upper : current_upper + inp_size]  # noqa: E203
+                cache[slice_idx] = max(
+                    cache[slice_idx], inp_slice.abs().max().detach()
+                )  # type: ignore[call-overload]
+                current_upper += inp_size
+
+    elif calibration_type in [
+        InputRangeCalibrationType.MOVING_QUANTILE,
+        InputRangeCalibrationType.MOVING_STD,
+    ]:
+        current_upper = 0
+        for slice_idx, inp_size in enumerate(mod.in_sizes):
+            inp_slice = x_input[..., current_upper : current_upper + inp_size]  # noqa: E203
+            idx = mod.input_range_update_idx[slice_idx]
+
+            if calibration_type == InputRangeCalibrationType.MOVING_QUANTILE:
+                val = (
+                    inp_slice.abs().max()
+                    if ir_quantile == 1.0
+                    else inp_slice.float().flatten().quantile(ir_quantile)
+                ).item()
+            else:
+                std = inp_slice.std().item()
+                val = ir_params.init_std_alpha * std
+
+            old_val = mod.input_range[slice_idx].item()
+            new_val = (old_val * idx + val) / (idx + 1)
+            mod.input_range.data[slice_idx] = new_val.type_as(mod.input_range)
+            mod.input_range_update_idx[slice_idx] += 1
+
+            current_upper += inp_size
+    else:
+        raise ConfigError(f"Unknown InputRangeCalibrationType {calibration_type}")
+
+    global_cache[cache_key] = cache
 
 
 @no_grad()
@@ -81,7 +149,8 @@ def calibrate_input_ranges(
     dataloader: Iterator,
     quantile: float = 0.99995,
     max_samples: int = 1000,
-    verbose: bool = False,
+    std_alpha: Optional[float] = None,
+    verbose: bool = True,
 ) -> None:
     """Calibrate the input ranges according to the defined strategy.
 
@@ -106,16 +175,131 @@ def calibrate_input_ranges(
             Defaults to 1000.
         std_alpha: Number of standard deviations for moving
             standard deviation strategy. Defaults to ``init_std_alpha`` from RPUConfig
-        force_all_layers: Whether to force all layers to be
-            (re)-calibrated (default). Otherwise only the layer having
-            ``input_range.enable = True`` will be calibrated.
         verbose: Whether to print verbose output.
 
     Raises:
         ConfigError: If RPUConfig does not support input range learning
-        ArgumentError: If non-analog model is given
 
     """
     # pylint: disable=too-many-statements, too-many-locals, too-many-branches
 
-    raise NotImplementedError("This function is not yet implemented.")
+    sample_layer: AnalogLinear
+    sample_layer = next(model.analog_layers())  # type: ignore[assignment]
+    is_training = sample_layer.training
+    rpu_config = sample_layer.rpu_config
+
+    if rpu_config.pre_post.input_range.enable:
+        raise ConfigError(
+            "You can only calibrate input ranges for models that don't have input ranges."
+        )
+    if rpu_config.forward.inp_res > 0:
+        raise ConfigError(
+            "When calibrating the input ranges, the input res must be infinite (-1 or 0)"
+        )
+    if is_training:
+        raise ConfigError("Calibration can only be done in test mode.")
+
+    cache: Dict[str, Tensor]
+    cache = {}
+
+    old_rpu_config: Dict[str, TorchInferenceRPUConfig]
+    old_rpu_config = {}
+
+    handles: List[RemovableHandle]
+    handles = []
+
+    for layer_name, layer in model.named_analog_layers():
+        layer: AnalogLinear  # type: ignore[no-redef]
+
+        if calibration_type in [
+            InputRangeCalibrationType.MOVING_QUANTILE,
+            InputRangeCalibrationType.MOVING_STD,
+        ]:
+            # we actually first change the rpu_config to enable the input range
+            layer.rpu_config.pre_post.input_range.enable = True
+            layer.rpu_config.pre_post.input_range.learn_input_range = True
+            layer.rpu_config.pre_post.input_range.init_value = 3.0
+            if std_alpha is not None:
+                layer.rpu_config.pre_post.input_range.init_std_alpha = std_alpha
+
+            layer.input_range = Parameter(
+                data=full(
+                    (len(layer.in_sizes),),
+                    fill_value=rpu_config.pre_post.input_range.init_value,
+                    dtype=layer.weight.dtype,
+                    device=layer.weight.device,
+                ),
+                requires_grad=rpu_config.pre_post.input_range.learn_input_range,
+            )
+            layer.input_range_update_idx = Parameter(
+                data=zeros((len(layer.in_sizes),), dtype=int32, device=layer.weight.device),
+                requires_grad=False,
+            )
+
+        # turn off output noise and turn off the weight modifier
+        # generate hook
+        old_rpu_config[layer_name] = deepcopy(layer.rpu_config)
+        layer.rpu_config.forward.out_noise = 0.0
+        layer.rpu_config.modifier.type = WeightModifierType.NONE
+
+        cache[layer_name] = tensor([])
+        hook = partial(
+            _calibration_pre_forward,
+            ir_quantile=quantile,
+            calibration_type=calibration_type,
+            cache_key=layer_name,
+            global_cache=cache,
+            max_samples=max_samples,
+        )
+        handles.append(layer.register_forward_pre_hook(hook, with_kwargs=True))
+
+    # Pass through the samples
+    progress_bar = tqdm if verbose else lambda x: x
+    for args, kwargs in progress_bar(dataloader):  # type: ignore[operator]
+        model(*args, **kwargs)
+
+    # Remove hooks
+    for handle in handles:
+        handle.remove()
+
+    # Re-assign the rpu-configs but also enable the IR range
+    # and create the according Parameters
+    for layer_name, layer in model.named_analog_layers():
+        layer: AnalogLinear  # type: ignore[no-redef]
+
+        layer.input_range_update_idx = Parameter(
+            data=full((len(layer.in_sizes),), fill_value=float("-Inf"), device=layer.weight.device),
+            requires_grad=False,
+        )
+
+        rpu_config: TorchInferenceRPUConfig  # type: ignore[no-redef]
+        rpu_config = old_rpu_config[layer_name]
+
+        if calibration_type in [
+            InputRangeCalibrationType.CACHE_QUANTILE,
+            InputRangeCalibrationType.MAX,
+        ]:
+            rpu_config.pre_post.input_range.enable = True
+
+            layer.input_range = Parameter(
+                data=empty(
+                    (len(layer.in_sizes),), dtype=layer.weight.dtype, device=layer.weight.device
+                ).fill_(rpu_config.pre_post.input_range.init_value),
+                requires_grad=rpu_config.pre_post.input_range.learn_input_range,
+            )
+
+            cached_inputs = cache[layer_name]
+            if calibration_type == InputRangeCalibrationType.CACHE_QUANTILE:
+                current_upper = 0
+                for slice_idx, inp_size in enumerate(layer.in_sizes):
+                    inp_slice = cached_inputs[
+                        ..., current_upper : current_upper + inp_size
+                    ]  # noqa: E203
+                    layer.input_range.data[slice_idx] = (
+                        inp_slice.flatten().quantile(quantile).item()
+                    )
+                    current_upper += inp_size
+            elif calibration_type == InputRangeCalibrationType.MAX:
+                layer.input_range.data = cached_inputs
+
+        layer.rpu_config = rpu_config

@@ -29,6 +29,9 @@ class WeightModifierType(Enum):
     ADD_NORMAL = "AddNormal"
     """Additive Gaussian noise."""
 
+    ADD_NORMAL_PER_CHANNEL = "AddNormalPerChannel"
+    """Additive Gaussian noise per channel."""
+
     DISCRETIZE_ADD_NORMAL = "DiscretizeAddNormal"
     """First discretize and then additive Gaussian noise."""
 

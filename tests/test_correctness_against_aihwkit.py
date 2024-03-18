@@ -277,6 +277,7 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
         WeightModifierType.DISCRETIZE,
         WeightModifierType.NONE,
         WeightModifierType.ADD_NORMAL,
+        WeightModifierType.ADD_NORMAL_PER_CHANNEL,
         WeightModifierType.DISCRETIZE_ADD_NORMAL,
     ],
 )
@@ -304,7 +305,7 @@ def test_weight_modifier(
     rpu_config.modifier.res = res
     rpu_config.modifier.std_dev = 0.05
 
-    model = AnalogLinear(in_features=in_size, out_features=1, rpu_config=rpu_config, bias=False)
+    model = AnalogLinear(in_features=in_size, out_features=20, rpu_config=rpu_config, bias=False)
     model = model.to(device=device, dtype=dtype)
 
     weights = randn_like(model.weight, device=device)
@@ -314,7 +315,11 @@ def test_weight_modifier(
     manual_seed(0)
     out = model(inp)  # pylint: disable=not-callable
 
-    assumed_wmax = weights.abs().max()
+    assumed_wmax = (
+        weights.abs().amax(dim=1, keepdim=True)
+        if modifier_type == WeightModifierType.ADD_NORMAL_PER_CHANNEL
+        else weights.abs().max()
+    )
     if modifier_type in [WeightModifierType.DISCRETIZE, WeightModifierType.DISCRETIZE_ADD_NORMAL]:
         res = rpu_config.modifier.res
         n_states = res / 2 if res > 1.0 else 1 / (2 * res)
@@ -325,7 +330,11 @@ def test_weight_modifier(
         quantized_weights = weights
 
     manual_seed(0)
-    if modifier_type in [WeightModifierType.ADD_NORMAL, WeightModifierType.DISCRETIZE_ADD_NORMAL]:
+    if modifier_type in [
+        WeightModifierType.ADD_NORMAL,
+        WeightModifierType.ADD_NORMAL_PER_CHANNEL,
+        WeightModifierType.DISCRETIZE_ADD_NORMAL,
+    ]:
         noise = (
             rpu_config.modifier.std_dev
             * assumed_wmax

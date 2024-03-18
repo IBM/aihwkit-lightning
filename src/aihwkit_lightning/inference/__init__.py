@@ -13,4 +13,7 @@
 """High level inference tools."""
 
 # Convenience imports for easier access to the classes.
-from aihwkit_lightning.inference.calibration.calibration import calibrate_input_ranges, InputRangeCalibrationType
+from aihwkit_lightning.inference.calibration.calibration import (
+    calibrate_input_ranges,
+    InputRangeCalibrationType,
+)

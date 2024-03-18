@@ -11,7 +11,7 @@
 # that they have been altered from the originals.
 
 """Module class for analog linear layer."""
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Union
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
 from torch import Tensor, empty, zeros, zeros_like, clamp, randn_like
@@ -182,8 +182,25 @@ class AnalogLinear(Linear, AnalogLayerBase):
             if self.rpu_config.forward.inp_res > 0:
                 inp_slice = UniformQuantize.apply(inp_slice, self.rpu_config.forward.inp_res, False)
 
+            assumed_wmax = None
+            if self.rpu_config.modifier.type in [
+                WeightModifierType.DISCRETIZE,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL,
+                WeightModifierType.ADD_NORMAL,
+            ]:
+                assumed_wmax = (
+                    modified_weights[:, current_upper : current_upper + inp_size].abs().max()
+                )
+            elif self.rpu_config.modifier.type == WeightModifierType.ADD_NORMAL_PER_CHANNEL:
+                assumed_wmax = (
+                    modified_weights[:, current_upper : current_upper + inp_size]
+                    .abs()
+                    .amax(dim=1, keepdim=True)
+                )
+
             modified_slice = self.modify_weight(
-                modified_weights[:, current_upper : current_upper + inp_size]
+                modified_weights[:, current_upper : current_upper + inp_size],
+                assumed_wmax=assumed_wmax,
             )
             out_slice = inp_slice @ modified_slice.T
 
@@ -247,11 +264,12 @@ class AnalogLinear(Linear, AnalogLayerBase):
         base, extra = divmod(size, n_splits)
         return [base + (i < extra) for i in range(n_splits)]
 
-    def modify_weight(self, inp_weight: Tensor) -> Tensor:
+    def modify_weight(self, inp_weight: Tensor, assumed_wmax: Union[Tensor, None]) -> Tensor:
         """Modified weights in-place, so .clone() before if it's not NONE.
 
         Args:
             inp_weight: Input weights.
+            assumed_wmax: Assumed maximum weight value.
 
         Raises:
             ConfigError: Unsupported/unknown weight modifier type.
@@ -263,19 +281,22 @@ class AnalogLinear(Linear, AnalogLayerBase):
         if modifier.type == WeightModifierType.NONE:
             return inp_weight
 
-        assumed_wmax = inp_weight.abs().max()
+        assert assumed_wmax is not None, "Assumed wmax must be provided for weight modifier"
         if modifier.type in [
             WeightModifierType.DISCRETIZE,
             WeightModifierType.DISCRETIZE_ADD_NORMAL,
         ]:
             res = modifier.res
             n_states = max(res, 1 / res)
-            res = assumed_wmax / n_states
+            res = assumed_wmax.item() / n_states
 
         if modifier.type == WeightModifierType.DISCRETIZE:
             # - Discretize the weights on the fly and backprob through them
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
-        elif modifier.type == WeightModifierType.ADD_NORMAL:
+        elif modifier.type in [
+            WeightModifierType.ADD_NORMAL,
+            WeightModifierType.ADD_NORMAL_PER_CHANNEL,
+        ]:
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
