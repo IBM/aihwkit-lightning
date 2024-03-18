@@ -37,6 +37,7 @@ from torch.optim import AdamW
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
 from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
+from aihwkit.simulator.configs import WeightModifierType as AIHWKITWeightModifierType
 
 from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
@@ -344,3 +345,65 @@ def test_weight_modifier(
     out_expected = matmul(inp, quantized_weights.T)
 
     assert allclose(out, out_expected, atol=1e-5)
+
+
+@mark.parametrize("device", ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16])
+def test_weight_modifier_gradient(
+    device: str, dtype: torch_dtype
+):
+    """Test the weight modifier."""
+
+    if device == "cuda" and SKIP_CUDA_TESTS:
+        raise SkipTest("CUDA tests are disabled/ can't be performed")
+
+    manual_seed(0)
+    in_size = 10
+    out_size = 20
+
+    def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
+        # AIHWKIT-specific configurations
+        if isinstance(rpu_config, AIHWKITRPUConfig):
+            rpu_config.mapping.max_output_size = -1
+            rpu_config.forward.is_perfect = True
+            rpu_config.modifier.type = AIHWKITWeightModifierType.ADD_NORMAL
+        else:
+            rpu_config.modifier.type = WeightModifierType.ADD_NORMAL
+        rpu_config.modifier.std_dev = 0.05
+        rpu_config.forward.inp_res = -1
+        rpu_config.forward.out_res = -1
+        rpu_config.forward.out_bound = -1
+        rpu_config.forward.out_noise = 0.0
+        rpu_config.mapping.max_input_size = 256
+        rpu_config.pre_post.input_range.enable = False
+        return rpu_config
+
+    aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
+    rpu = populate_rpu(RPUConfig())
+
+    aihwkit_linear = AIHWKITAnalogLinear(
+        in_features=in_size, out_features=out_size, rpu_config=aihwkit_rpu
+    )
+    linear = AnalogLinear(in_features=in_size, out_features=out_size, rpu_config=rpu)
+
+    aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
+    linear = linear.to(device=device, dtype=dtype)
+
+    aihwkit_weights, aihwkit_biases = aihwkit_linear.get_weights()
+    linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
+
+    inp = randn(in_size, device=device, dtype=dtype)
+
+    manual_seed(0)
+    out_aihwkit: Tensor
+    out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
+
+    manual_seed(0)
+    out: Tensor
+    out = linear(inp)  # pylint: disable=not-callable
+
+    out_aihwkit.sum().backward()
+    out.sum().backward()
+
+    assert allclose(out_aihwkit, out, atol=1e-5)
+    assert allclose(aihwkit_linear.analog_module.array[0][0].tile.weight.grad, linear.weight.grad)
