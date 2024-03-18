@@ -155,6 +155,8 @@ class AnalogLinear(Linear, AnalogLayerBase):
     def forward(self, inp: Tensor) -> Tensor:  # pylint: disable=arguments-renamed
         """Forward function."""
 
+        # pylint: disable=too-many-branches, too-many-statements, too-many-locals
+
         modified_weights = self.weight
         apply_weight_modifier = (
             self.training or self.rpu_config.modifier.enable_during_test
@@ -185,37 +187,66 @@ class AnalogLinear(Linear, AnalogLayerBase):
             if self.rpu_config.forward.inp_res > 0:
                 inp_slice = UniformQuantize.apply(inp_slice, self.rpu_config.forward.inp_res, False)
 
-            assumed_wmax = None
+            # do we meed assumed_wmax per-column or per-tensor? or not at all?
+            need_assumed_wmax = False
+            need_assumed_wmax_per_channel = False
+            reduce_assumed_wmax_for_weight_modifier = False
+            if self.training and self.rpu_config.forward.out_noise > 0:
+                need_assumed_wmax = True
+                if self.rpu_config.forward.out_noise_per_channel:
+                    need_assumed_wmax_per_channel = True
             if apply_weight_modifier and self.rpu_config.modifier.type in [
                 WeightModifierType.DISCRETIZE,
                 WeightModifierType.DISCRETIZE_ADD_NORMAL,
                 WeightModifierType.ADD_NORMAL,
             ]:
-                assumed_wmax = (
-                    modified_weights[:, current_upper : current_upper + inp_size].abs().max()
-                )
+                need_assumed_wmax = True
+                reduce_assumed_wmax_for_weight_modifier = True
             elif (
                 apply_weight_modifier
                 and self.rpu_config.modifier.type == WeightModifierType.ADD_NORMAL_PER_CHANNEL
             ):
-                assumed_wmax = (
-                    modified_weights[:, current_upper : current_upper + inp_size]
-                    .abs()
-                    .amax(dim=1, keepdim=True)
-                )
+                need_assumed_wmax = True
+                need_assumed_wmax_per_channel = True
 
-            if apply_weight_modifier:
+            if need_assumed_wmax:
+                if need_assumed_wmax_per_channel:
+                    assumed_wmax = (
+                        modified_weights[:, current_upper : current_upper + inp_size]
+                        .abs()
+                        .amax(dim=1, keepdim=True)
+                    )
+                else:
+                    assumed_wmax = (
+                        modified_weights[:, current_upper : current_upper + inp_size].abs().max()
+                    )
+            else:
+                assumed_wmax = None
+
+            if apply_weight_modifier and assumed_wmax is not None:
                 modified_slice = self.modify_weight(
                     modified_weights[:, current_upper : current_upper + inp_size],
-                    assumed_wmax=assumed_wmax,
+                    assumed_wmax=(
+                        assumed_wmax.max()
+                        if reduce_assumed_wmax_for_weight_modifier
+                        else assumed_wmax
+                    ),
                 )
             else:
                 modified_slice = modified_weights[:, current_upper : current_upper + inp_size]
 
             out_slice = inp_slice @ modified_slice.T
 
-            # maybe add some output noise
-            # TODO
+            if self.training and self.rpu_config.forward.out_noise > 0:
+                assert assumed_wmax is not None, "Assumed wmax must be provided for out noise"
+                with no_grad():
+                    # note that assumed_wmax has the correct shape here
+                    if out_slice.ndim == 1:
+                        assumed_wmax = assumed_wmax.view(-1)
+                    out_noise = (
+                        assumed_wmax * self.rpu_config.forward.out_noise * randn_like(out_slice)
+                    )
+                out_slice += out_noise
 
             if self.rpu_config.pre_post.input_range.enable:
                 out_slice *= self.input_range[slice_idx]
@@ -298,7 +329,8 @@ class AnalogLinear(Linear, AnalogLayerBase):
         ]:
             res = modifier.res
             n_states = max(res, 1 / res)
-            res = assumed_wmax.item() / n_states
+            # assumed_wamax.item() would result in fp16 imprecision
+            res = assumed_wmax / n_states  # type: ignore[assignment]
 
         if modifier.type == WeightModifierType.DISCRETIZE:
             # - Discretize the weights on the fly and backprob through them

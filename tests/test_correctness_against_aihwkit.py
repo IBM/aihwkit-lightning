@@ -306,7 +306,7 @@ def test_weight_modifier(
     rpu_config.modifier.res = res
     rpu_config.modifier.std_dev = 0.05
 
-    model = AnalogLinear(in_features=in_size, out_features=20, rpu_config=rpu_config, bias=False)
+    model = AnalogLinear(in_features=in_size, out_features=1, rpu_config=rpu_config, bias=False)
     model = model.to(device=device, dtype=dtype)
 
     weights = randn_like(model.weight, device=device)
@@ -401,6 +401,72 @@ def test_weight_modifier_gradient(
         linear = linear.eval()
 
     inp = randn(in_size, device=device, dtype=dtype)
+
+    manual_seed(0)
+    out_aihwkit: Tensor
+    out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
+
+    manual_seed(0)
+    out: Tensor
+    out = linear(inp)  # pylint: disable=not-callable
+
+    assert allclose(out_aihwkit, out, atol=1e-5)
+
+
+@mark.parametrize("is_test", [True, False])
+@mark.parametrize("out_noise_per_channel", [True, False])
+@mark.parametrize("device", ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32])  # bug in AIHWKIT for fp16 and bfloat16
+def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, dtype: torch_dtype):
+    """Test the weight modifier backward behavior."""
+
+    if device == "cuda" and SKIP_CUDA_TESTS:
+        raise SkipTest("CUDA tests are disabled/ can't be performed")
+
+    manual_seed(0)
+    in_size = 10
+    out_size = 20
+
+    def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
+        # AIHWKIT-specific configurations
+        if isinstance(rpu_config, AIHWKITRPUConfig):
+            rpu_config.mapping.max_output_size = -1
+            rpu_config.forward.noise_management = NoiseManagementType.NONE
+            rpu_config.forward.bound_management = BoundManagementType.NONE
+            rpu_config.mapping.weight_scaling_columnwise = out_noise_per_channel
+            rpu_config.forward.out_noise = 0.0 if is_test else 0.05
+        else:
+            rpu_config.forward.out_noise_per_channel = out_noise_per_channel
+            rpu_config.forward.out_noise = 0.05
+
+        rpu_config.forward.inp_res = 2**8 - 2
+        rpu_config.forward.out_res = -1
+        rpu_config.forward.out_bound = -1
+        rpu_config.mapping.max_input_size = 256
+        rpu_config.pre_post.input_range.enable = True
+        return rpu_config
+
+    aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
+    rpu = populate_rpu(RPUConfig())
+
+    aihwkit_linear = AIHWKITAnalogLinear(
+        in_features=in_size, out_features=out_size, rpu_config=aihwkit_rpu
+    )
+    linear = AnalogLinear(in_features=in_size, out_features=out_size, rpu_config=rpu)
+
+    aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
+    linear = linear.to(device=device, dtype=dtype)
+
+    aihwkit_weights, aihwkit_biases = aihwkit_linear.get_weights()
+    linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
+
+    if is_test:
+        aihwkit_linear = aihwkit_linear.eval()
+        linear = linear.eval()
+
+    inp = randn(in_size, device=device, dtype=dtype)
+
+    aihwkit_linear.remap_analog_weights()
 
     manual_seed(0)
     out_aihwkit: Tensor

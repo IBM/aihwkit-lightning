@@ -40,3 +40,11 @@ class IOParameters(_PrintableMixin):
     (:math:`\sigma_\text{out}`) at each output, i.e. noisiness of
     device summation at the output.
     """
+
+    out_noise_per_channel: bool = False
+    r"""Output noise strength at each output of a tile.
+
+    This sets the std-deviation of the Gaussian output noise
+    (:math:`\sigma_\text{out}`) at each output, i.e. noisiness of
+    device summation at the output.
+    """
