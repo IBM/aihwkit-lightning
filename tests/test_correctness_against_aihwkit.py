@@ -200,7 +200,7 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     ir_init_value: float,
     ir_init_from_data: int,
     ir_init_std_alpha: float,
-    device: torch_device,
+    device: str,
     dtype: torch_dtype,
 ):
     """Test the input range backward pass."""

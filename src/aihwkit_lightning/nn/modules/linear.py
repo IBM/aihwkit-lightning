@@ -264,9 +264,13 @@ class AnalogLinear(Linear, AnalogLayerBase):
             return inp_weight
 
         assumed_wmax = inp_weight.abs().max()
-        res = modifier.res
-        n_states = max(res, 1 / res)
-        res = assumed_wmax / n_states
+        if modifier.type in [
+            WeightModifierType.DISCRETIZE,
+            WeightModifierType.DISCRETIZE_ADD_NORMAL,
+        ]:
+            res = modifier.res
+            n_states = max(res, 1 / res)
+            res = assumed_wmax / n_states
 
         if modifier.type == WeightModifierType.DISCRETIZE:
             # - Discretize the weights on the fly and backprob through them
