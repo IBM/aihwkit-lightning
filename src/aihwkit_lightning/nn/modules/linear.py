@@ -156,7 +156,10 @@ class AnalogLinear(Linear, AnalogLayerBase):
         """Forward function."""
 
         modified_weights = self.weight
-        if self.rpu_config.modifier.type != WeightModifierType.NONE:
+        apply_weight_modifier = (
+            self.training or self.rpu_config.modifier.enable_during_test
+        ) and self.rpu_config.modifier.type != WeightModifierType.NONE
+        if apply_weight_modifier:
             modified_weights = self.weight.clone()
 
         current_upper = 0
@@ -183,7 +186,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
                 inp_slice = UniformQuantize.apply(inp_slice, self.rpu_config.forward.inp_res, False)
 
             assumed_wmax = None
-            if self.rpu_config.modifier.type in [
+            if apply_weight_modifier and self.rpu_config.modifier.type in [
                 WeightModifierType.DISCRETIZE,
                 WeightModifierType.DISCRETIZE_ADD_NORMAL,
                 WeightModifierType.ADD_NORMAL,
@@ -191,17 +194,24 @@ class AnalogLinear(Linear, AnalogLayerBase):
                 assumed_wmax = (
                     modified_weights[:, current_upper : current_upper + inp_size].abs().max()
                 )
-            elif self.rpu_config.modifier.type == WeightModifierType.ADD_NORMAL_PER_CHANNEL:
+            elif (
+                apply_weight_modifier
+                and self.rpu_config.modifier.type == WeightModifierType.ADD_NORMAL_PER_CHANNEL
+            ):
                 assumed_wmax = (
                     modified_weights[:, current_upper : current_upper + inp_size]
                     .abs()
                     .amax(dim=1, keepdim=True)
                 )
 
-            modified_slice = self.modify_weight(
-                modified_weights[:, current_upper : current_upper + inp_size],
-                assumed_wmax=assumed_wmax,
-            )
+            if apply_weight_modifier:
+                modified_slice = self.modify_weight(
+                    modified_weights[:, current_upper : current_upper + inp_size],
+                    assumed_wmax=assumed_wmax,
+                )
+            else:
+                modified_slice = modified_weights[:, current_upper : current_upper + inp_size]
+
             out_slice = inp_slice @ modified_slice.T
 
             # maybe add some output noise
@@ -265,7 +275,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
         return [base + (i < extra) for i in range(n_splits)]
 
     def modify_weight(self, inp_weight: Tensor, assumed_wmax: Union[Tensor, None]) -> Tensor:
-        """Modified weights in-place, so .clone() before if it's not NONE.
+        """Modifies weights in-place, so .clone() before passing the weights here.
 
         Args:
             inp_weight: Input weights.

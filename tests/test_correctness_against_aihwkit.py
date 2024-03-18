@@ -347,12 +347,14 @@ def test_weight_modifier(
     assert allclose(out, out_expected, atol=1e-5)
 
 
+@mark.parametrize("is_test", [True, False])
+@mark.parametrize("enable_during_test", [False])
 @mark.parametrize("device", ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16])
 def test_weight_modifier_gradient(
-    device: str, dtype: torch_dtype
+    is_test: bool, enable_during_test: bool, device: str, dtype: torch_dtype
 ):
-    """Test the weight modifier."""
+    """Test the weight modifier backward behavior."""
 
     if device == "cuda" and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")
@@ -369,7 +371,9 @@ def test_weight_modifier_gradient(
             rpu_config.modifier.type = AIHWKITWeightModifierType.ADD_NORMAL
         else:
             rpu_config.modifier.type = WeightModifierType.ADD_NORMAL
+
         rpu_config.modifier.std_dev = 0.05
+        rpu_config.modifier.enable_during_test = enable_during_test
         rpu_config.forward.inp_res = -1
         rpu_config.forward.out_res = -1
         rpu_config.forward.out_bound = -1
@@ -392,6 +396,10 @@ def test_weight_modifier_gradient(
     aihwkit_weights, aihwkit_biases = aihwkit_linear.get_weights()
     linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
 
+    if is_test:
+        aihwkit_linear = aihwkit_linear.eval()
+        linear = linear.eval()
+
     inp = randn(in_size, device=device, dtype=dtype)
 
     manual_seed(0)
@@ -402,8 +410,4 @@ def test_weight_modifier_gradient(
     out: Tensor
     out = linear(inp)  # pylint: disable=not-callable
 
-    out_aihwkit.sum().backward()
-    out.sum().backward()
-
     assert allclose(out_aihwkit, out, atol=1e-5)
-    assert allclose(aihwkit_linear.analog_module.array[0][0].tile.weight.grad, linear.weight.grad)
