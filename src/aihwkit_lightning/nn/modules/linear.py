@@ -341,12 +341,12 @@ class AnalogLinear(Linear, AnalogLayerBase):
         ]:
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
-            inp_weight = inp_weight + noise
+                inp_weight = inp_weight + noise
         elif modifier.type == WeightModifierType.DISCRETIZE_ADD_NORMAL:
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
-            inp_weight = inp_weight + noise
+                inp_weight = inp_weight + noise
         else:
             raise ConfigError(f"Weight modifier {modifier} not supported")
         return inp_weight
