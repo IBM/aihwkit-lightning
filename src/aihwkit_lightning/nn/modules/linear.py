@@ -79,16 +79,24 @@ class StraightThroughClamp(Function):
     # pylint: disable=abstract-method, redefined-builtin, arguments-differ
 
     @staticmethod
-    def forward(ctx: FunctionCtx, x_input: Tensor, input_range: Tensor) -> Tensor:
-        ctx.save_for_backward(x_input, input_range)
-        return x_input.clamp(min=-input_range, max=input_range)
+    def forward(
+        ctx: FunctionCtx,
+        x_input: Tensor,
+        upper_thresh: Tensor,
+        lower_thresh: Tensor,
+        input_range: Tensor,
+    ) -> Tensor:
+        clamped_mask = upper_thresh | lower_thresh
+        exactly_the_same = x_input.abs() == input_range
+        ctx.save_for_backward(clamped_mask & ~exactly_the_same)
+        return clamp(x_input, min=-input_range, max=input_range)
 
     @staticmethod
     # type: ignore[override]
-    def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, None, None]:
-        x_input, input_range = ctx.saved_tensors  # type: ignore[attr-defined]
-        d_output[(x_input < -input_range) | (x_input > input_range)] = 0.0
-        return d_output, None, None
+    def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, None, None, None, None]:
+        (clamped_mask,) = ctx.saved_tensors  # type: ignore[attr-defined]
+        d_output[clamped_mask] = 0.0
+        return d_output, None, None, None, None
 
 
 class InputRangeForward(Function):
@@ -103,41 +111,46 @@ class InputRangeForward(Function):
         ctx: FunctionCtx,
         x_input: Tensor,
         input_range: Tensor,
+        upper_thresh: Tensor,
+        lower_thresh: Tensor,
         decay: float,
         input_min_percentage: float,
     ) -> Tensor:
-        ctx.save_for_backward(x_input, input_range)
+        ctx.save_for_backward(upper_thresh, lower_thresh, input_range)
         ctx.decay = decay  # type: ignore[attr-defined]
         ctx.input_min_percentage = input_min_percentage  # type: ignore[attr-defined]
         return x_input
 
     @staticmethod
     # type: ignore[override]
-    def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, Tensor, None, None]:
+    def backward(
+        ctx: FunctionCtx, d_output: Tensor
+    ) -> Tuple[Tensor, Tensor, None, None, None, None]:
 
-        x_input: Tensor
+        upper_thresh: Tensor
+        lower_thresh: Tensor
         input_range: Tensor
 
-        x_input, input_range = ctx.saved_tensors  # type: ignore[attr-defined]
+        upper_thresh, lower_thresh, input_range = ctx.saved_tensors  # type: ignore[attr-defined]
         ir_grad = None
 
         if input_range is not None:
             decay = ctx.decay  # type: ignore[attr-defined]
             input_min_percentage = ctx.input_min_percentage  # type: ignore[attr-defined]
 
-            upper_thres = x_input >= input_range  # pylint: disable=invalid-unary-operand-type
-            lower_thres = x_input <= -input_range  # pylint: disable=invalid-unary-operand-type
+            # upper_thres = x_input >= input_range  # pylint: disable=invalid-unary-operand-type
+            # lower_thres = x_input <= -input_range  # pylint: disable=invalid-unary-operand-type
             ir_grad = zeros_like(input_range)
-            ir_grad += clamp(upper_thres * d_output, min=None, max=0.0).sum()
-            ir_grad -= clamp(lower_thres * d_output, min=0.0, max=None).sum()
+            ir_grad += clamp(d_output[upper_thresh], min=None, max=0.0).sum()
+            ir_grad -= clamp(d_output[lower_thresh], min=0.0, max=None).sum()
             ir_grad *= input_range
             if decay > 0:
                 # - We shrink the input range if less than X% of the inputs are clipping.
                 # where X is 1-ir_params.input_min_percentage
-                percentage = (x_input.abs() < input_range).float().mean()
+                percentage = 1.0 - (upper_thresh | lower_thresh).sum().div(upper_thresh.numel())
                 ir_grad += decay * input_range * (percentage > input_min_percentage)
 
-        return d_output, ir_grad, None, None
+        return d_output, ir_grad, None, None, None, None
 
 
 class AnalogLinear(Linear, AnalogLayerBase):
@@ -190,13 +203,15 @@ class AnalogLinear(Linear, AnalogLayerBase):
             inp_slice = inp[..., current_upper : current_upper + inp_size]  # noqa: E203
 
             if self.rpu_config.pre_post.input_range.enable:
-                inp_slice = self.apply_input_range(
+                inp_slice, upper_thresh, lower_thresh = self.apply_input_range(
                     values=inp_slice, slice_idx=slice_idx, update_from_data=self.training
                 )
 
                 inp_slice = InputRangeForward.apply(
                     inp_slice,
                     self.input_range[slice_idx],
+                    upper_thresh,
+                    lower_thresh,
                     self.rpu_config.pre_post.input_range.decay,
                     self.rpu_config.pre_post.input_range.input_min_percentage,
                 )
@@ -278,7 +293,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
 
     def apply_input_range(
         self, values: Tensor, slice_idx: int, update_from_data: bool = False
-    ) -> Tensor:
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         """Apply the input clipping.
 
         Args:
@@ -289,10 +304,6 @@ class AnalogLinear(Linear, AnalogLayerBase):
         Returns:
             clipped output tensor
         """
-
-        if not self.rpu_config.pre_post.input_range.enable:
-            return values
-
         if update_from_data:
             ir_params = self.rpu_config.pre_post.input_range
             idx = self.input_range_update_idx[slice_idx]
@@ -305,9 +316,12 @@ class AnalogLinear(Linear, AnalogLayerBase):
                     self.input_range_update_idx[slice_idx] += 1
                 self.input_range.data[slice_idx] = self.input_range.data[slice_idx].abs()
 
-        x_clamped = StraightThroughClamp.apply(values, self.input_range[slice_idx])
+        input_range = self.input_range[slice_idx]
+        upper_thresh = values >= input_range
+        lower_thresh = values <= -input_range
+        x_clamped = StraightThroughClamp.apply(values, upper_thresh, lower_thresh, input_range)
 
-        return x_clamped
+        return x_clamped, upper_thresh, lower_thresh
 
     def get_split_sizes(self, size: int, split_max_size: int) -> List[int]:
         """Computed the split sizes.

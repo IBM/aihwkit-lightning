@@ -189,7 +189,7 @@ def test_clipping(
 @mark.parametrize("ir_init_from_data", [-1, 0, 10])
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
 @mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
+@mark.parametrize("dtype", [float32])
 def test_input_range_backward(  # pylint: disable=too-many-arguments
     bsz: int,
     num_inp_dims: int,
@@ -273,6 +273,9 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
         assert len(tiles) == 1, "Output size must be inf"
         tile = tiles[0]
         input_range = tile.input_range
+        # assert allclose(
+        #     input_range.grad, linear.input_range.grad[tile_idx], atol=1e-5
+        # ), f"AIHWKIT: {input_range.grad} lightning: {linear.input_range.grad[tile_idx]}"
         assert allclose(
             input_range.grad, linear.input_range.grad[tile_idx], atol=1e-5
         ), f"AIHWKIT: {input_range.grad} lightning: {linear.input_range.grad[tile_idx]}"

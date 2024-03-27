@@ -251,6 +251,7 @@ def fast_abs_max(weights: Tensor):
             triton.cdiv(n_cols, meta["BLOCK_SIZE_N_COLS"])
             * triton.cdiv(n_rows, meta["BLOCK_SIZE_N_ROWS"]),
         )
+
     fast_abs_max_kernel[grid](
         weights, per_channel_amax, weights.stride(0), weights.stride(1), n_cols, n_rows
     )

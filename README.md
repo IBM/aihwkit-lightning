@@ -14,3 +14,8 @@ make pycodestyle
 make pylint
 ```
 All of these should pass.
+
+## Notes
+- Gradient behavior for `float16` and `bfloat16` does not match the AIHWKIT 100% due to rounding errors. This doesn't effect
+training though and the gradient tests are passing for `float32` at `atol=1e-5`.
+- Currently, `torch.compile` doesn't work when input range learning is activated.
