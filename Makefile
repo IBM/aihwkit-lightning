@@ -16,7 +16,7 @@ mypy:
 	mypy --show-error-codes src/
 
 pycodestyle:
-	pycodestyle src/ tests/ examples/
+	pycodestyle src/ tests/
 
 pylint:
 	git ls-files | grep -E ".*\.py$$" | grep -v "pb2\.py$$" | xargs  pylint -rn

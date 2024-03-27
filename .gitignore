@@ -26,6 +26,7 @@ __pycache__/
 *.so
 
 wandb/
+debug/
 
 # Distribution / packaging
 .Python
