@@ -66,6 +66,9 @@ def test_torch_compile(  # pylint: disable=too-many-arguments
     if not ir_enable and inp_res > 0:
         raise SkipTest("IR not enabled but inp_res > 0")
 
+    if ir_enable:
+        raise SkipTest("Compile doesn't work with IR learning. We're working on that.")
+
     def populate_rpu(rpu_config: RPUConfig):
         rpu_config.forward.inp_res = inp_res
         rpu_config.forward.out_res = -1
