@@ -71,6 +71,26 @@ class UniformQuantize(Function):
         return grad_input, None, None, None
 
 
+class StraightThroughClamp(Function):
+    """
+    Straight-through clamp function.
+    """
+
+    # pylint: disable=abstract-method, redefined-builtin, arguments-differ
+
+    @staticmethod
+    def forward(ctx: FunctionCtx, x_input: Tensor, input_range: Tensor) -> Tensor:
+        ctx.save_for_backward(x_input, input_range)
+        return x_input.clamp(min=-input_range, max=input_range)
+
+    @staticmethod
+    # type: ignore[override]
+    def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, None, None]:
+        x_input, input_range = ctx.saved_tensors  # type: ignore[attr-defined]
+        d_output[(x_input < -input_range) | (x_input > input_range)] = 0.0
+        return d_output, None, None
+
+
 class InputRangeForward(Function):
     """
     Enable custom input range gradient computation using torch's autograd.
@@ -170,10 +190,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
             inp_slice = inp[..., current_upper : current_upper + inp_size]  # noqa: E203
 
             if self.rpu_config.pre_post.input_range.enable:
-                with no_grad():
-                    inp_slice = self.apply_input_range(
-                        values=inp_slice, slice_idx=slice_idx, update_from_data=self.training
-                    )
+                inp_slice = self.apply_input_range(
+                    values=inp_slice, slice_idx=slice_idx, update_from_data=self.training
+                )
 
                 inp_slice = InputRangeForward.apply(
                     inp_slice,
@@ -286,7 +305,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
                     self.input_range_update_idx[slice_idx] += 1
                 self.input_range.data[slice_idx] = self.input_range.data[slice_idx].abs()
 
-        return clamp(values, min=-self.input_range[slice_idx], max=self.input_range[slice_idx])
+        x_clamped = StraightThroughClamp.apply(values, self.input_range[slice_idx])
+
+        return x_clamped
 
     def get_split_sizes(self, size: int, split_max_size: int) -> List[int]:
         """Computed the split sizes.

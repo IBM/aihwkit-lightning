@@ -212,6 +212,8 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     if num_inp_dims == 1 and bsz > 1:
         raise SkipTest("1D input but bsz > 1")
 
+    manual_seed(0)
+
     def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
         # AIHWKIT-specific configurations
         if isinstance(rpu_config, AIHWKITRPUConfig):
@@ -246,14 +248,17 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
 
     if num_inp_dims == 1:
-        inp = randn(inp_size, device=device, dtype=dtype)
+        inp = randn(inp_size, device=device, dtype=dtype, requires_grad=True)
     if num_inp_dims == 2:
-        inp = randn(bsz, inp_size, device=device, dtype=dtype)
+        inp = randn(bsz, inp_size, device=device, dtype=dtype, requires_grad=True)
     else:
-        inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype)
+        inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype, requires_grad=True)
+
+    inp_aihwkit = randn_like(inp, device=device, dtype=dtype, requires_grad=True)
+    inp_aihwkit.data = inp.data
 
     out_aihwkit: Tensor
-    out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
+    out_aihwkit = aihwkit_linear(inp_aihwkit)  # pylint: disable=not-callable
 
     out: Tensor
     out = linear(inp)  # pylint: disable=not-callable
@@ -261,6 +266,7 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     out_aihwkit.sum().backward()
     out.sum().backward()
 
+    assert allclose(inp_aihwkit.grad, inp.grad, atol=1e-5), "grad w.r.t. the input not matching"
     assert allclose(out_aihwkit, out, atol=1e-5)
 
     for tile_idx, tiles in enumerate(aihwkit_linear.analog_module.array):
