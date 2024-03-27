@@ -12,9 +12,8 @@
 
 """Helper function for computing sliced abs-max."""
 
-# import torch
-import triton
-import triton.language as tl
+import triton  # type: ignore
+import triton.language as tl  # type: ignore
 from torch import full, Tensor, float32
 
 
