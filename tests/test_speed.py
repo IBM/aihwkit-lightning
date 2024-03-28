@@ -14,6 +14,8 @@
 """Test the speed."""
 
 import os
+from typing import Union
+from contextlib import redirect_stdout
 from unittest import SkipTest
 from pytest import mark
 
@@ -22,9 +24,22 @@ from torch import device as torch_device
 from torch import cuda as torch_cuda
 from torch import randn, float32, float16, bfloat16, Tensor
 from torch import compile as torch_compile
+from torch.optim import Optimizer, AdamW
+from torch.nn import Linear
+from torch.utils import benchmark
+
+from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
+from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
+from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
+from aihwkit.simulator.configs import WeightModifierType as AIHWKITWeightModifierType
+from aihwkit.simulator.configs import WeightClipType as AIHWKITWeightClipType
+from aihwkit.simulator.configs import WeightRemapType
+from aihwkit.optim.analog_optimizer import AnalogOptimizerMixin
 
 from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
+from aihwkit_lightning.simulator.configs import WeightModifierType, WeightClipType
+from aihwkit_lightning.optim import AnalogOptimizer
 
 
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
@@ -99,3 +114,196 @@ def test_torch_compile(  # pylint: disable=too-many-arguments
         return out
 
     forward_backward(linear, inp)
+
+
+def gen_rpu(ir_enable: bool, weight_noise_enable: bool, clip_enable: bool):
+    """Generate the RPU configuration."""
+
+    def rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
+        rpu_config.mapping.max_input_size = -1
+        rpu_config.forward.inp_res = 254 if ir_enable else -1
+        rpu_config.pre_post.input_range.enable = ir_enable
+        rpu_config.pre_post.input_range.learn_input_range = True
+        rpu_config.clip.sigma = 2.0
+        rpu_config.modifier.std_dev = 0.01
+
+        if isinstance(rpu_config, AIHWKITRPUConfig):
+            rpu_config.forward.is_perfect = not ir_enable
+            rpu_config.mapping.max_output_size = -1
+            rpu_config.mapping.learn_out_scaling = False
+            rpu_config.mapping.weight_scaling_omega = 1.0
+            rpu_config.mapping.weight_scaling_columnwise = False
+            rpu_config.mapping.out_scaling_columnwise = False
+            rpu_config.forward.noise_management = NoiseManagementType.NONE
+            rpu_config.forward.bound_management = BoundManagementType.NONE
+            rpu_config.remap.type = WeightRemapType.LAYERWISE_SYMMETRIC
+
+            rpu_config.modifier.type = (
+                AIHWKITWeightModifierType.ADD_NORMAL
+                if weight_noise_enable
+                else AIHWKITWeightModifierType.NONE
+            )
+            rpu_config.clip.type = (
+                AIHWKITWeightClipType.LAYER_GAUSSIAN if clip_enable else AIHWKITWeightClipType.NONE
+            )
+        else:
+            rpu_config.modifier.type = (
+                WeightModifierType.ADD_NORMAL if weight_noise_enable else WeightModifierType.NONE
+            )
+            rpu_config.clip.type = (
+                WeightClipType.LAYER_GAUSSIAN if clip_enable else WeightClipType.NONE
+            )
+        return rpu_config
+
+    lightning_config = rpu(RPUConfig())
+    aihwkit_config = rpu(AIHWKITRPUConfig())
+
+    return lightning_config, aihwkit_config
+
+
+def linear_forward_backward_and_step(
+    linear: Union[Linear, AnalogLinear], inp: Tensor, optimizer: Optimizer
+):
+    """Perform the forward, backward and step operations."""
+    out = linear(inp)
+    out.sum().backward()
+    optimizer.step()
+
+
+def benchmark_speed_and_peak_memory_of_fwd_bwd(
+    lightning_rpu_config: RPUConfig, aihwkit_rpu_config: AIHWKITRPUConfig
+):
+    """Benchmark the speed and peak memory of the forward pass."""
+    bsz = 128
+    dtype = float16
+    device = "cpu"
+    sizes = [128 * 2**i for i in range(5)]
+    sizes = [512]
+    results = []
+
+    for size in sizes:
+        linear = AnalogLinear(
+            in_features=size, out_features=size, bias=True, rpu_config=lightning_rpu_config
+        )
+        linear = linear.to(device=device, dtype=dtype)
+        optim = AnalogOptimizer(AdamW, linear.analog_layers(), linear.parameters(), lr=0.0)
+
+        aihwkit_linear = AIHWKITAnalogLinear(
+            in_features=size, out_features=size, bias=True, rpu_config=aihwkit_rpu_config
+        )
+        aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
+        aihwkit_linear.analog_module.set_weights(randn((size, size), device=device, dtype=dtype).T)
+        aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
+
+        class AihwkitAnalogAdamW(AnalogOptimizerMixin, AdamW):
+            """AIHWKIT AdamW optimizer."""
+
+        aihwkit_optim = AihwkitAnalogAdamW(aihwkit_linear.parameters(), lr=0.0)
+
+        torch_linear = Linear(size, size, bias=True)
+        torch_linear = torch_linear.to(device=device, dtype=dtype)
+        torch_optim = AdamW(torch_linear.parameters(), lr=0.0)
+
+        inp = randn((bsz, size), device=device, dtype=dtype, requires_grad=True)
+
+        label = "LinearFwdBwdStep"
+        sub_label = f"[{size}, {size}]"
+
+        for num_threads in [1, 4, 16, 32]:
+            redirect_print(f"Benchmarking size {size} threads {num_threads}...")
+            results.append(
+                benchmark.Timer(
+                    stmt="linear_forward_backward_and_step(linear, inp, optim)",
+                    setup="from __main__ import linear_forward_backward_and_step",
+                    globals={"linear": linear, "inp": inp, "optim": optim},
+                    num_threads=num_threads,
+                    label=label,
+                    sub_label=sub_label,
+                    description="AIHWKIT (lightning)",
+                ).timeit(10)
+            )
+
+            results.append(
+                benchmark.Timer(
+                    stmt="linear_forward_backward_and_step(linear, inp, optim)",
+                    setup="from __main__ import linear_forward_backward_and_step",
+                    globals={"linear": aihwkit_linear, "inp": inp, "optim": aihwkit_optim},
+                    num_threads=num_threads,
+                    label=label,
+                    sub_label=sub_label,
+                    description="AIHWKIT",
+                ).timeit(10)
+            )
+
+            results.append(
+                benchmark.Timer(
+                    stmt="linear_forward_backward_and_step(linear, inp, optim)",
+                    setup="from __main__ import linear_forward_backward_and_step",
+                    globals={"linear": torch_linear, "inp": inp, "optim": torch_optim},
+                    num_threads=num_threads,
+                    label=label,
+                    sub_label=sub_label,
+                    description="torch",
+                ).timeit(10)
+            )
+    compare = benchmark.Compare(results)
+    redirect_print(str(compare))
+
+
+def redirect_print(string: str):
+    """Redirect the print to a file."""
+
+    with open("debug/benchmarks/out.txt", "w") as file:  # pylint: disable=unspecified-encoding
+        with redirect_stdout(file):
+            print(string)
+    print(string, flush=True)
+
+
+def benchmark_aihwkit_lightning():
+    """Benchmark the speed of the fwd bwd step for differenet rpu-configs."""
+
+    os.makedirs("debug/benchmarks", exist_ok=True)
+
+    redirect_print("-------------------------------------")
+    redirect_print("----------Nothing turned on----------")
+    lightning_rpu_config, aihwkit_rpu_config = gen_rpu(
+        ir_enable=False, weight_noise_enable=False, clip_enable=False
+    )
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_config, aihwkit_rpu_config)
+    redirect_print("=====================================\n\n")
+
+    redirect_print("--------------------------------------")
+    redirect_print("---------------Clipping---------------")
+    lightning_rpu_clip, aihwkit_rpu_clip = gen_rpu(
+        ir_enable=False, weight_noise_enable=False, clip_enable=True
+    )
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_clip, aihwkit_rpu_clip)
+    redirect_print("======================================\n\n")
+
+    redirect_print("-----------------------------------------")
+    redirect_print("---------------WeightNoise---------------")
+    lightning_rpu_weight_noise, aihwkit_rpu_weight_noise = gen_rpu(
+        ir_enable=False, weight_noise_enable=True, clip_enable=False
+    )
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_weight_noise, aihwkit_rpu_weight_noise)
+    redirect_print("=========================================\n\n")
+
+    redirect_print("--------------------------------")
+    redirect_print("---------------IR---------------")
+    lightning_rpu_ir, aihwkit_rpu_ir = gen_rpu(
+        ir_enable=True, weight_noise_enable=False, clip_enable=False
+    )
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_ir, aihwkit_rpu_ir)
+    redirect_print("================================\n\n")
+
+    redirect_print("-----------------------------------------------------")
+    redirect_print("---------------Clipping+WeightNoise+IR---------------")
+    lightning_rpu_all, aihwkit_rpu_all = gen_rpu(
+        ir_enable=True, weight_noise_enable=True, clip_enable=True
+    )
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
+    redirect_print("=====================================================")
+
+
+if __name__ == "__main__":
+    benchmark_aihwkit_lightning()
