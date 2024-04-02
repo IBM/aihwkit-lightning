@@ -176,7 +176,9 @@ def benchmark_speed_and_peak_memory_of_fwd_bwd(
     """Benchmark the speed and peak memory of the forward pass."""
     bsz = 128
     dtype = float16
-    device = "cpu"
+    device = torch_device("cuda" if torch_cuda.is_available() else "cpu")
+    assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
+    
     sizes = [128 * 2**i for i in range(5)]
     sizes = [512]
     results = []
@@ -220,7 +222,7 @@ def benchmark_speed_and_peak_memory_of_fwd_bwd(
                     label=label,
                     sub_label=sub_label,
                     description="AIHWKIT (lightning)",
-                ).timeit(10)
+                ).timeit(500)
             )
 
             results.append(
@@ -232,7 +234,7 @@ def benchmark_speed_and_peak_memory_of_fwd_bwd(
                     label=label,
                     sub_label=sub_label,
                     description="AIHWKIT",
-                ).timeit(10)
+                ).timeit(500)
             )
 
             results.append(
@@ -244,7 +246,7 @@ def benchmark_speed_and_peak_memory_of_fwd_bwd(
                     label=label,
                     sub_label=sub_label,
                     description="torch",
-                ).timeit(10)
+                ).timeit(500)
             )
     compare = benchmark.Compare(results)
     redirect_print(str(compare))
