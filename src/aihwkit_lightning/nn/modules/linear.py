@@ -585,7 +585,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
             WeightClipType.LAYER_GAUSSIAN,
             WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
         ]:
-            self.weight.data = self.weight.data.clamp(-sigma_std, sigma_std)
+            self.weight.data.clamp_(-sigma_std, sigma_std)
         else:
             raise ValueError(f"Unknown clip type {clip_type}")
 
