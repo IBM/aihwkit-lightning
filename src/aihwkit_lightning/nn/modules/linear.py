@@ -12,9 +12,10 @@
 
 """Module class for analog linear layer."""
 from typing import Optional, Tuple, List, Union
+import os
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
-from torch import Tensor, empty, zeros, zeros_like, clamp, randn_like
+from torch import Tensor, cuda, empty, zeros, zeros_like, clamp, randn_like
 from torch.nn import Linear, Parameter
 from aihwkit_lightning.simulator.configs import (
     TorchInferenceRPUConfig,
@@ -23,6 +24,24 @@ from aihwkit_lightning.simulator.configs import (
 )
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.exceptions import ConfigError
+
+
+def is_at_least_volta_gpu():
+    if cuda.is_available():
+        gpu_properties = cuda.get_device_properties(0)
+        if gpu_properties.major >= 7:
+            return True
+    return False
+
+TRITON_AVAIL = False
+try:
+    from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
+
+    if not is_at_least_volta_gpu():
+        raise ImportError("GPU must at least be Volta")
+    TRITON_AVAIL = True
+except ImportError:
+    print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
 
 
 class UniformQuantize(Function):
@@ -218,6 +237,19 @@ class AnalogLinear(Linear, AnalogLayerBase):
         ) and self.rpu_config.modifier.type != WeightModifierType.NONE
         if apply_weight_modifier:
             modified_weights = self.weight.clone()
+
+        triton_disabled = os.environ.get("AIHWKIT_DISABLE_TRITON", False)
+        if TRITON_AVAIL and len(self.in_sizes) > 1 and not triton_disabled:
+            out = TritonLinear.apply(
+                inp,
+                modified_weights,
+                self.input_range,
+                self.in_sizes,
+                self.rpu_config,
+                self.training,
+                apply_weight_modifier
+            )
+            return out + self.bias if self.bias is not None else out
 
         current_upper = 0
         out = 0.0

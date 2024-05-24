@@ -17,3 +17,4 @@
 from aihwkit_lightning.nn.modules.container import AnalogSequential, AnalogWrapper
 from aihwkit_lightning.nn.modules.linear import AnalogLinear
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
+from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
