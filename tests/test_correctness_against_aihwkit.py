@@ -14,7 +14,7 @@
 """Test the forward/backward correctness of our CPU/CUDA version to AIHWKIT."""
 
 import os
-from typing import Union
+from typing import Union, List
 from unittest import SkipTest
 from pytest import mark
 
@@ -33,13 +33,15 @@ from torch import (
     manual_seed,
 )
 from torch.optim import AdamW
+from torch.nn import Conv2d
 
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
+from aihwkit.nn import AnalogConv2d as AIWHKITAnalogConv2d
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
 from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
 from aihwkit.simulator.configs import WeightModifierType as AIHWKITWeightModifierType
 
-from aihwkit_lightning.nn import AnalogLinear
+from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.optim import AnalogOptimizer
 from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
@@ -137,6 +139,210 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
     out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
     out = linear(inp)  # pylint: disable=not-callable
     assert allclose(out_aihwkit, out, atol=1e-5)
+
+
+@mark.parametrize("bsz", [1, 10])
+@mark.parametrize("num_inp_dims", [1, 2])
+@mark.parametrize("height", [10, 513])
+@mark.parametrize("width", [10, 513])
+@mark.parametrize("in_channels", [3, 10])
+@mark.parametrize("out_channels", [3, 10])
+@mark.parametrize("kernel_size", [[3, 3], [3, 4]])
+@mark.parametrize("stride", [[1, 1]])
+@mark.parametrize("padding", [[1, 1]])
+@mark.parametrize("dilation", [[1, 1]])
+@mark.parametrize("groups", [1])
+@mark.parametrize("bias", [True])
+@mark.parametrize("inp_res", [2**8 - 2])
+@mark.parametrize("max_inp_size", [256, 512])
+@mark.parametrize("ir_enable", [True, False])
+@mark.parametrize("ir_learn_input_range", [True, False])
+@mark.parametrize("ir_init_value", [3.0])
+@mark.parametrize("ir_init_from_data", [10])
+@mark.parametrize("ir_init_std_alpha", [3.0])
+@mark.parametrize("device", ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16])
+def test_conv2d_forward(  # pylint: disable=too-many-arguments
+    bsz: int,
+    num_inp_dims: int,
+    height: int,
+    width: int,
+    in_channels: int,
+    out_channels: int,
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
+    bias: bool,
+    inp_res: float,
+    max_inp_size: int,
+    ir_enable: bool,
+    ir_learn_input_range: bool,
+    ir_init_value: float,
+    ir_init_from_data: int,
+    ir_init_std_alpha: float,
+    device: torch_device,
+    dtype: torch_dtype,
+):
+    """Test the Con2D forward pass."""
+
+    if device == "cuda" and SKIP_CUDA_TESTS:
+        raise SkipTest("CUDA tests are disabled/ can't be performed")
+
+    if not ir_enable and inp_res > 0:
+        raise SkipTest("IR not enabled but inp_res > 0")
+
+    if groups > 1:
+        raise SkipTest("AIHWKIT currently does not support groups > 1")
+
+    def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
+        # AIHWKIT-specific configurations
+        if isinstance(rpu_config, AIHWKITRPUConfig):
+            rpu_config.mapping.max_output_size = -1
+            rpu_config.forward.noise_management = (
+                NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
+            )
+            rpu_config.forward.bound_management = BoundManagementType.NONE
+
+        rpu_config.forward.inp_res = inp_res
+        rpu_config.forward.out_res = -1
+        rpu_config.forward.out_bound = -1
+        rpu_config.forward.out_noise = 0.0
+        rpu_config.mapping.max_input_size = max_inp_size
+        rpu_config.pre_post.input_range.enable = ir_enable
+        rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
+        rpu_config.pre_post.input_range.init_value = ir_init_value
+        rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
+        rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
+        return rpu_config
+
+    aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
+    rpu = populate_rpu(RPUConfig())
+
+    aihwkit_analog_conv2d = AIWHKITAnalogConv2d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+        bias=bias,
+        rpu_config=aihwkit_rpu,
+    )
+
+    analog_conv2d = AnalogConv2d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+        bias=bias,
+        rpu_config=rpu,
+        device=device,
+        dtype=dtype,
+    )
+
+    aihwkit_analog_conv2d = aihwkit_analog_conv2d.eval()
+    analog_conv2d = analog_conv2d.eval()
+
+    aihwkit_analog_conv2d = aihwkit_analog_conv2d.to(device=device, dtype=dtype)
+    analog_conv2d = analog_conv2d.to(device=device, dtype=dtype)
+
+    if num_inp_dims == 1:
+        inp = randn(in_channels, height, width, device=device, dtype=dtype)
+    else:
+        assert num_inp_dims == 2, "Only batched or non-batched inputs are supported"
+        inp = randn(bsz, in_channels, height, width, device=device, dtype=dtype)
+
+    digital_aihwkit_conv2d = AIWHKITAnalogConv2d.to_digital(aihwkit_analog_conv2d)
+    conv_weight = digital_aihwkit_conv2d.weight.to(device=device, dtype=dtype)
+    conv_bias = digital_aihwkit_conv2d.bias
+    conv_bias = conv_bias.to(device=device, dtype=dtype) if conv_bias is not None else None
+    analog_conv2d.set_weights_and_biases(conv_weight, conv_bias)
+
+    out_aihwkit = aihwkit_analog_conv2d(inp)  # pylint: disable=not-callable
+    out = analog_conv2d(inp)  # pylint: disable=not-callable
+    assert allclose(out_aihwkit, out, atol=1e-5)
+
+    if inp_res == -1 and not ir_enable:
+        conv2d = Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            bias=bias,
+            device=device,
+            dtype=dtype,
+        )
+
+        conv2d.weight.data = conv_weight.clone()
+        conv2d.bias.data = conv_bias.clone()
+        out_digital = conv2d(inp)
+        assert allclose(out, out_digital, atol=1e-5)
+
+
+@mark.parametrize("height", [10, 513])
+@mark.parametrize("width", [10, 513])
+@mark.parametrize("in_channels", [3, 10])
+@mark.parametrize("out_channels", [3, 10])
+@mark.parametrize("kernel_size", [[3, 3]])
+@mark.parametrize("stride", [[1, 1]])
+@mark.parametrize("padding", [[1, 1]])
+@mark.parametrize("dilation", [[1, 1]])
+@mark.parametrize("groups", [1])
+@mark.parametrize("bias", [True])
+@mark.parametrize("device", ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16])
+def test_conv2d_to_and_from_digital(  # pylint: disable=too-many-arguments
+    height: int,
+    width: int,
+    in_channels: int,
+    out_channels: int,
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
+    bias: bool,
+    device: torch_device,
+    dtype: torch_dtype,
+):
+    """Test the Con2D forward pass."""
+
+    if device == "cuda" and SKIP_CUDA_TESTS:
+        raise SkipTest("CUDA tests are disabled/ can't be performed")
+
+    if groups > 1:
+        raise SkipTest("AIHWKIT currently does not support groups > 1")
+
+    rpu = RPUConfig()
+    analog_conv2d = AnalogConv2d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+        bias=bias,
+        rpu_config=rpu,
+        device=device,
+        dtype=dtype,
+    )
+
+    digital_conv2d = AnalogConv2d.to_digital(analog_conv2d)
+    re_analog_conv2d = AnalogConv2d.from_digital(digital_conv2d, rpu_config=rpu)
+    inp = randn(in_channels, height, width, device=device, dtype=dtype)
+    out_orig = analog_conv2d(inp)
+    out_re_analog = re_analog_conv2d(inp)  # pylint: disable=not-callable
+    assert allclose(out_orig, out_re_analog, atol=1e-5)
 
 
 @mark.parametrize(

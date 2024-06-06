@@ -28,7 +28,7 @@ class InputRangeParameter(_PrintableMixin):
 
     act_range_momentum: float = 0.95
     """Momentum for the activation range."""
-    
+
     enable: bool = field(default_factory=lambda: False, metadata={"always_show": True})
     """Whether to enable to learn the input range. Note that if enable is
     ``False`` then no clip is applied.

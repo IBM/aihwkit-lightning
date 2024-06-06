@@ -18,9 +18,9 @@ from typing import Union
 from pytest import mark
 from torch import Tensor, randn, allclose, save, load
 from torch import device as torch_device
-from torch.nn import Module, Linear
+from torch.nn import Module, Linear, Conv2d
 from torch.optim import AdamW
-from aihwkit_lightning.nn import AnalogLinear
+from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
 from aihwkit_lightning.nn.conversion import AnalogWrapper, convert_to_analog
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from aihwkit_lightning.optim import AnalogOptimizer
@@ -31,6 +31,7 @@ class Model(Module):
 
     def __init__(self):
         super().__init__()
+        self.conv1 = Conv2d(in_channels=3, out_channels=10, kernel_size=3)
         self.fc1 = Linear(10, 10)
         self.fc2 = Linear(10, 10)
 
@@ -44,6 +45,8 @@ class Model(Module):
         Returns:
             Tensor: Output.
         """
+        x = self.conv1(x)
+        x = x.reshape(-1, 10)
         x = self.fc1(x)
         x = self.fc2(x)
         return x
@@ -77,12 +80,15 @@ def test_conversion(
     )
     if inplace and conversion_map != {}:
         assert isinstance(model.fc1, AnalogLinear)
+        assert isinstance(model.conv1, AnalogConv2d)
     if conversion_map == {}:
         assert isinstance(analog_model.fc1, Linear)
         assert isinstance(analog_model.fc2, Linear)
+        assert isinstance(analog_model.conv1, Conv2d)
     if not inplace:
         assert isinstance(model.fc1, Linear) and model.fc1.weight.device == torch_device("cpu")
         assert isinstance(model.fc2, Linear) and model.fc2.weight.device == torch_device("cpu")
+        assert isinstance(model.conv1, Conv2d) and model.conv1.weight.device == torch_device("cpu")
     if ensure_analog_root:
         assert isinstance(analog_model, AnalogWrapper)
     else:
@@ -90,6 +96,7 @@ def test_conversion(
         assert isinstance(analog_model, Model)
     if exclude_modules == ["fc2"]:
         assert isinstance(analog_model.fc1, AnalogLinear)
+        assert isinstance(analog_model.conv1, AnalogConv2d)
         assert isinstance(analog_model.fc2, Linear)
         assert not isinstance(analog_model.fc2, AnalogLinear)
 
@@ -97,7 +104,7 @@ def test_conversion(
 def test_optimizer_state():
     """Test loading the optimizer state and compare to torch"""
     rpu_config = TorchInferenceRPUConfig()
-    inp = randn(10)
+    inp = randn(1, 3, 10, 10)
 
     model = Model()
     model_sd = model.state_dict()

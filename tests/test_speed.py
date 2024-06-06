@@ -178,7 +178,7 @@ def benchmark_speed_and_peak_memory_of_fwd_bwd(
     dtype = float16
     device = torch_device("cuda" if torch_cuda.is_available() else "cpu")
     assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
-    
+
     sizes = [128 * 2**i for i in range(5)]
     sizes = [512]
     results = []

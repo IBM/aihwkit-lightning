@@ -17,7 +17,7 @@ import triton.language as tl  # type: ignore
 from torch.autograd import Function
 from torch.autograd.function import FunctionCtx
 from torch import Tensor, empty, tensor
-from aihwkit_lightning.nn.modules.triton_utils.abs_max import sliced_fast_abs_max 
+from aihwkit_lightning.nn.modules.triton_utils.abs_max import sliced_fast_abs_max
 from aihwkit_lightning.simulator.configs import (
     TorchInferenceRPUConfig,
     WeightClipType,
@@ -27,19 +27,19 @@ from aihwkit_lightning.simulator.configs import (
 
 # @triton.autotune(
 #     configs=[triton.Config(
-#             {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 32, "BLOCK_SIZE_OUT": 128, "GROUP_SIZE_INP": 1},
-#             num_warps=8, num_stages=0)],
+#     {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 32, "BLOCK_SIZE_OUT": 128, "GROUP_SIZE_INP": 1},
+#     num_warps=8, num_stages=0)],
 #     key=["inp_size", "hidden_size", "out_size"],
 # )
 @triton.jit
 def matmul_kernel(
     # pointers to tensors
-    inp_ptr, # 2D [inp_size, hidden_size]
-    weights_ptr, # 2D [hidden_size, out_size]
-    out_ptr, # 2D [inp_size, out_size]
-    assumed_wmax_ptr, # 2D [num_slices, out_size]
-    input_range_ptr, # 1D [num_slices]
-    upper_end_of_slices_ptr, # 1D [num_slices]
+    inp_ptr,  # 2D [inp_size, hidden_size]
+    weights_ptr,  # 2D [hidden_size, out_size]
+    out_ptr,  # 2D [inp_size, out_size]
+    assumed_wmax_ptr,  # 2D [num_slices, out_size]
+    input_range_ptr,  # 1D [num_slices]
+    upper_end_of_slices_ptr,  # 1D [num_slices]
     # sizes
     inp_size,
     hidden_size,
@@ -73,7 +73,7 @@ class TritonLinear(Function):
         in_sizes: List[int],
         rpu_config: TorchInferenceRPUConfig,
         training: bool,
-        apply_weight_modifier: bool
+        apply_weight_modifier: bool,
     ):
         assert input_range.is_contiguous(), "input_range not contiguous"
         assert weights.is_contiguous(), "weights not contiguous"
@@ -82,7 +82,9 @@ class TritonLinear(Function):
         assumed_wmax = sliced_fast_abs_max(weights=weights, split_sizes=in_sizes)
         assert assumed_wmax.is_contiguous(), "assumed_wmax not contiguous"
 
-        upper_end_of_slices = tensor(in_sizes, device=inp.device, dtype=inp.dtype).cumsum(dim=0).contiguous()
+        upper_end_of_slices = (
+            tensor(in_sizes, device=inp.device, dtype=inp.dtype).cumsum(dim=0).contiguous()
+        )
 
         out_shape = (*inp.shape[:-1], weights.size(0))
         inp = inp.flatten(end_dim=-2)
@@ -92,20 +94,22 @@ class TritonLinear(Function):
         inp_size = inp.size(1)
 
         # invoke kernel
-        grid = lambda META: (
-            triton.cdiv(inp_size, META["BLOCK_SIZE_INP"]) * triton.cdiv(hidden_size, META["BLOCK_SIZE_HIDDEN"])\
-                    * triton.cdiv(out_size, META["BLOCK_SIZE_OUT"]),
-        )
+        def grid(meta):
+            return (
+                triton.cdiv(inp_size, meta["BLOCK_SIZE_INP"])
+                * triton.cdiv(hidden_size, meta["BLOCK_SIZE_HIDDEN"])
+                * triton.cdiv(out_size, meta["BLOCK_SIZE_OUT"]),
+            )
 
         out = empty((inp_size, out_size), device=inp.device, dtype=inp.dtype)
 
         matmul_kernel[grid](
-            inp, # 2D [inp_size, hidden_size]
-            weights.T, # 2D [hidden_size, out_size]
-            out, # 2D [inp_size, out_size]
-            assumed_wmax, # 2D [num_slices, out_size]
-            input_range, # 1D [num_slices]
-            upper_end_of_slices, # 1D [num_slices]
+            inp,  # 2D [inp_size, hidden_size]
+            weights.T,  # 2D [hidden_size, out_size]
+            out,  # 2D [inp_size, out_size]
+            assumed_wmax,  # 2D [num_slices, out_size]
+            input_range,  # 1D [num_slices]
+            upper_end_of_slices,  # 1D [num_slices]
             # sizes
             inp_size,
             hidden_size,
@@ -114,7 +118,7 @@ class TritonLinear(Function):
             # strides
             inp.stride(0),
             inp.stride(1),
-            weights.stride(1), # flipped because of transpose
+            weights.stride(1),  # flipped because of transpose
             weights.stride(0),
             out.stride(0),
             out.stride(1),
@@ -130,7 +134,6 @@ class TritonLinear(Function):
 
         return out.view(out_shape)
 
-
     @staticmethod
-    def backward(ctx: FunctionCtx, grad_output: Tensor):
+    def backward(ctx: FunctionCtx, grad_output: Tensor):  # type: ignore
         pass
