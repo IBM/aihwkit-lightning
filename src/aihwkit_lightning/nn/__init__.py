@@ -16,4 +16,12 @@
 
 from aihwkit_lightning.nn.modules.container import AnalogSequential, AnalogWrapper
 from aihwkit_lightning.nn.modules.linear import AnalogLinear
+from aihwkit_lightning.nn.modules.conv import AnalogConv2d
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
+from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
+
+try:
+    from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
+except ImportError:
+    pass
+    # if this fails and shouldn't fail, an exception will be raised down the road and not here

@@ -10,9 +10,12 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-# pylint: disable=too-many-locals, too-many-public-methods, no-member
+# pylint: disable=too-many-locals, too-many-public-methods
+# pylint: disable=no-member, too-many-arguments, too-many-branches
+
 """Test the calibration of the input ranges."""
 
+from typing import Union
 import os
 from unittest import SkipTest
 from pytest import mark
@@ -21,7 +24,8 @@ from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch import cuda as torch_cuda
 from torch import allclose, randn, float32, float16, bfloat16
-from aihwkit_lightning.nn import AnalogLinear
+from torch.nn.functional import unfold
+from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from aihwkit_lightning.inference.calibration import (
     calibrate_input_ranges,
@@ -33,6 +37,7 @@ from aihwkit_lightning.exceptions import ConfigError
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 
 
+@mark.parametrize("module", [AnalogLinear, AnalogConv2d])
 @mark.parametrize(
     "cal_type",
     [
@@ -53,6 +58,7 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("device", ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16])
 def test_calibration(
+    module: Union[AnalogLinear, AnalogConv2d],
     cal_type: InputRangeCalibrationType,
     total_num_samples: int,
     in_size: int,
@@ -69,6 +75,9 @@ def test_calibration(
     if device == "cuda" and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")
 
+    if in_size > 10 and module == AnalogConv2d:
+        raise SkipTest("Skipping large input size for Conv2d")
+
     def populate_rpu(rpu_config: TorchInferenceRPUConfig):
         rpu_config.forward.inp_res = inp_res
         rpu_config.forward.out_noise = 0.0
@@ -78,14 +87,24 @@ def test_calibration(
         return rpu_config
 
     rpu = populate_rpu(TorchInferenceRPUConfig())
-    linear = AnalogLinear(in_features=in_size, out_features=out_size, rpu_config=rpu)
+    if module == AnalogConv2d:
+        linear_or_conv = module(
+            in_channels=in_size, out_channels=out_size, kernel_size=3, rpu_config=rpu
+        )
+    else:
+        linear_or_conv = module(in_features=in_size, out_features=out_size, rpu_config=rpu)
 
-    linear.to(dtype=dtype, device=torch_device(device))
+    linear_or_conv.to(dtype=dtype, device=torch_device(device))
 
     if is_test:
-        linear.eval()
+        linear_or_conv.eval()
 
-    all_inputs = randn((total_num_samples, in_size), dtype=dtype, device=torch_device(device))
+    if isinstance(linear_or_conv, AnalogConv2d):
+        all_inputs = randn(
+            (total_num_samples, in_size, 10, 10), dtype=dtype, device=torch_device(device)
+        )
+    else:
+        all_inputs = randn((total_num_samples, in_size), dtype=dtype, device=torch_device(device))
 
     class Sampler:
         """Example of a sampler used for calibration."""
@@ -102,25 +121,42 @@ def test_calibration(
             else:
                 raise StopIteration
             self.idx += 1
+            if isinstance(linear_or_conv, AnalogConv2d):
+                return (x,), {}
+
             return (), {"inp": x}
 
     try:
-        calibrate_input_ranges(linear, calibration_type=cal_type, dataloader=Sampler())
+        calibrate_input_ranges(linear_or_conv, calibration_type=cal_type, dataloader=Sampler())
     except ConfigError as exc:
         raise SkipTest("Calibration not supported for this configuration") from exc
 
     if cal_type in [InputRangeCalibrationType.CACHE_QUANTILE, InputRangeCalibrationType.MAX]:
         current_upper = 0
-        for slice_idx, inp_size in enumerate(linear.in_sizes):
-            inp_slice = all_inputs[..., current_upper : current_upper + inp_size]  # noqa: E203
+        for slice_idx, inp_size in enumerate(linear_or_conv.in_sizes):
+            if isinstance(linear_or_conv, AnalogConv2d):
+                all_inputs_unfolded = unfold(
+                    all_inputs,
+                    kernel_size=linear_or_conv.kernel_size,
+                    dilation=linear_or_conv.dilation,
+                    padding=linear_or_conv.padding,
+                    stride=linear_or_conv.stride,
+                ).transpose(-1, -2)
+                inp_slice = all_inputs_unfolded[
+                    ..., current_upper : current_upper + inp_size
+                ]  # noqa: E203
+                num_samples = all_inputs_unfolded.shape[:-1].numel()
+            else:
+                inp_slice = all_inputs[..., current_upper : current_upper + inp_size]  # noqa: E203
+                num_samples = all_inputs.shape[0]
             if cal_type == InputRangeCalibrationType.MAX:
                 assert allclose(
-                    linear.input_range.data[slice_idx], inp_slice.abs().max(), atol=1e-5
+                    linear_or_conv.input_range.data[slice_idx], inp_slice.abs().max(), atol=1e-5
                 )
             else:
-                if total_num_samples <= 1000:
+                if num_samples <= 1000:
                     assert allclose(
-                        linear.input_range.data[slice_idx],
+                        linear_or_conv.input_range.data[slice_idx],
                         inp_slice.float().flatten().quantile(0.99995).to(dtype=dtype),
                         atol=1e-5,
                     )

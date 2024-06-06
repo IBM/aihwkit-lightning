@@ -12,7 +12,7 @@
 
 """Calibration for inference."""
 
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, Tuple, List, Union
 from copy import deepcopy
 from collections.abc import Iterator
 from functools import partial
@@ -21,12 +21,13 @@ from enum import Enum
 from tqdm import tqdm
 
 from torch import tensor, Tensor, cat, randperm, no_grad, empty, zeros, full, int32
+from torch.nn.functional import unfold
 from torch.nn import Parameter
 from torch.nn.modules.module import RemovableHandle
 
 from aihwkit_lightning.exceptions import ConfigError
 from aihwkit_lightning.simulator.configs import WeightModifierType
-from aihwkit_lightning.nn import AnalogLinear
+from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 # mypy: disable-error-code="attr-defined"
@@ -55,7 +56,7 @@ class InputRangeCalibrationType(Enum):
 
 
 def _calibration_pre_forward(
-    mod: AnalogLinear,
+    mod: Union[AnalogLinear, AnalogConv2d],
     input_args: Tuple,
     input_kwargs: Dict,
     calibration_type: InputRangeCalibrationType,
@@ -77,6 +78,16 @@ def _calibration_pre_forward(
     # get rid of entries that are all-zeros
     x_input: Tensor
     x_input = input_args[0] if len(input_args) > 0 else input_kwargs["inp"]
+    if isinstance(mod, AnalogConv2d):
+        assert isinstance(mod.padding, tuple), "Padding must be a tuple"
+        x_input = unfold(
+            x_input,
+            kernel_size=mod.kernel_size,
+            dilation=mod.dilation,
+            padding=mod.padding,
+            stride=mod.stride,
+        ).transpose(-1, -2)
+
     x_input = x_input.reshape(-1, x_input.size(-1))
     x_input = x_input[~(x_input == 0.0).all(-1)]
 
@@ -118,6 +129,7 @@ def _calibration_pre_forward(
         current_upper = 0
         for slice_idx, inp_size in enumerate(mod.in_sizes):
             inp_slice = x_input[..., current_upper : current_upper + inp_size]  # noqa: E203
+            assert mod.input_range_update_idx is not None, "Input range update idx is None"
             idx = mod.input_range_update_idx[slice_idx]
 
             if calibration_type == InputRangeCalibrationType.MOVING_QUANTILE:
@@ -144,7 +156,7 @@ def _calibration_pre_forward(
 
 @no_grad()
 def calibrate_input_ranges(
-    model: AnalogLinear,
+    model: Union[AnalogLinear, AnalogConv2d],
     calibration_type: InputRangeCalibrationType,
     dataloader: Iterator,
     quantile: float = 0.99995,
@@ -183,7 +195,7 @@ def calibrate_input_ranges(
     """
     # pylint: disable=too-many-statements, too-many-locals, too-many-branches
 
-    sample_layer: AnalogLinear
+    sample_layer: Union[AnalogLinear, AnalogConv2d]
     sample_layer = next(model.analog_layers())  # type: ignore[assignment]
     is_training = sample_layer.training
     rpu_config = sample_layer.rpu_config
@@ -209,7 +221,7 @@ def calibrate_input_ranges(
     handles = []
 
     for layer_name, layer in model.named_analog_layers():
-        layer: AnalogLinear  # type: ignore[no-redef]
+        layer: Union[AnalogLinear, AnalogConv2d]  # type: ignore[no-redef]
 
         if calibration_type in [
             InputRangeCalibrationType.MOVING_QUANTILE,
@@ -265,7 +277,7 @@ def calibrate_input_ranges(
     # Re-assign the rpu-configs but also enable the IR range
     # and create the according Parameters
     for layer_name, layer in model.named_analog_layers():
-        layer: AnalogLinear  # type: ignore[no-redef]
+        layer: Union[AnalogLinear, AnalogConv2d]  # type: ignore[no-redef]
 
         layer.input_range_update_idx = Parameter(
             data=full((len(layer.in_sizes),), fill_value=float("-Inf"), device=layer.weight.device),
