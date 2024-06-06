@@ -333,8 +333,7 @@ class AnalogConv2d(_AnalogConvNd):
         ) // self.stride[0] + 1
         if len(im_shape) == 3:
             return out.view(self.out_channels, out_size, -1)
-        else:
-            return out.view(im_shape[0], self.out_channels, out_size, -1)
+        return out.view(im_shape[0], self.out_channels, out_size, -1)
 
     @classmethod
     def from_digital(cls, module: Conv2d, rpu_config: TorchInferenceRPUConfig) -> "AnalogConv2d":
