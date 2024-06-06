@@ -15,8 +15,8 @@
 # pylint: disable=too-many-arguments, too-many-locals, too-many-instance-attributes
 
 from typing import Optional, Tuple, Union, List
-
-from torch import Tensor, empty, zeros
+import os
+from torch import Tensor, cuda, empty, zeros
 from torch.nn import Parameter
 from torch.nn.functional import unfold
 from torch.nn.modules.conv import _ConvNd, Conv2d
@@ -29,6 +29,26 @@ from aihwkit_lightning.simulator.configs import (
     WeightClipType,
     WeightModifierType,
 )
+
+
+def is_at_least_volta_gpu():
+    """Check if the GPU is at least Volta."""
+    if cuda.is_available():
+        gpu_properties = cuda.get_device_properties(0)
+        if gpu_properties.major >= 7:
+            return True
+    return False
+
+
+TRITON_AVAIL = False
+try:
+    from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
+
+    if not is_at_least_volta_gpu():
+        raise ImportError("GPU must at least be Volta")
+    TRITON_AVAIL = True
+except ImportError:
+    print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
 
 
 class _AnalogConvNd(AnalogLayerBase, _ConvNd):
@@ -80,10 +100,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         self.out_features = out_channels
         self.rpu_config = rpu_config
 
-        self.in_sizes = self.get_split_sizes(
-            self.in_features,
-            rpu_config.mapping.max_input_size
-        )
+        self.in_sizes = self.get_split_sizes(self.in_features, rpu_config.mapping.max_input_size)
 
         if rpu_config.pre_post.input_range.enable:
             # for every vertical tile, we have an input range
@@ -283,20 +300,34 @@ class AnalogConv2d(_AnalogConvNd):
         ).transpose(-1, -2)
 
         modified_weights = modified_weights.view(self.out_channels, -1)
-        out = TorchLinear.linear(
-            inp=x_input_,
-            weights=modified_weights,
-            bias=self.bias,
-            input_range=self.input_range,
-            input_range_update_idx=self.input_range_update_idx,
-            x_min=self.x_min,
-            x_max=self.x_max,
-            in_sizes=self.in_sizes,
-            training=self.training,
-            rpu_config=self.rpu_config,
-            apply_weight_modifier=apply_weight_modifier,
-        ).transpose(-1, -2)
+        triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
+        if TRITON_AVAIL and len(self.in_sizes) > 1 and triton_enabled:
+            out = TritonLinear.apply(
+                x_input_,
+                modified_weights,
+                self.input_range,
+                self.in_sizes,
+                self.rpu_config,
+                self.training,
+                apply_weight_modifier,
+            )
+            out = out + self.bias if self.bias is not None else out
+        else:
+            out = TorchLinear.linear(
+                inp=x_input_,
+                weights=modified_weights,
+                bias=self.bias,
+                input_range=self.input_range,
+                input_range_update_idx=self.input_range_update_idx,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                in_sizes=self.in_sizes,
+                training=self.training,
+                rpu_config=self.rpu_config,
+                apply_weight_modifier=apply_weight_modifier,
+            )
 
+        out = out.transpose(-1, -2)
         out_size = (
             im_shape[-2] + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1
         ) // self.stride[0] + 1
@@ -306,9 +337,7 @@ class AnalogConv2d(_AnalogConvNd):
             return out.view(im_shape[0], self.out_channels, out_size, -1)
 
     @classmethod
-    def from_digital(
-        cls, module: Conv2d, rpu_config: TorchInferenceRPUConfig
-    ) -> "AnalogConv2d":
+    def from_digital(cls, module: Conv2d, rpu_config: TorchInferenceRPUConfig) -> "AnalogConv2d":
         """Return an AnalogConv2d layer from a torch Conv2d layer.
 
         Args:

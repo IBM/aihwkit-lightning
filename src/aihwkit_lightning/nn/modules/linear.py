@@ -105,8 +105,8 @@ class AnalogLinear(Linear, AnalogLayerBase):
         if apply_weight_modifier:
             modified_weights = self.weight.clone()
 
-        triton_disabled = os.environ.get("AIHWKIT_DISABLE_TRITON", False)
-        if TRITON_AVAIL and len(self.in_sizes) > 1 and not triton_disabled:
+        triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
+        if TRITON_AVAIL and len(self.in_sizes) > 1 and triton_enabled:
             out = TritonLinear.apply(
                 inp,
                 modified_weights,

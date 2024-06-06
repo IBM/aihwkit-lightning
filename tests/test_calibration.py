@@ -10,7 +10,9 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-# pylint: disable=too-many-locals, too-many-public-methods, no-member, too-many-arguments, too-many-branches
+# pylint: disable=too-many-locals, too-many-public-methods
+# pylint: disable=no-member, too-many-arguments, too-many-branches
+
 """Test the calibration of the input ranges."""
 
 from typing import Union

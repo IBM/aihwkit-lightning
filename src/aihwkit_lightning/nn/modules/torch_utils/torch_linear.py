@@ -15,10 +15,7 @@ from typing import List, Tuple, Union
 from torch import Tensor, randn_like, clamp, zeros_like
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
-from aihwkit_lightning.simulator.configs import (
-    TorchInferenceRPUConfig,
-    WeightModifierType,
-)
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightModifierType
 from aihwkit_lightning.exceptions import ConfigError
 
 
@@ -53,9 +50,7 @@ class UniformQuantize(Function):
 
     @staticmethod
     # type: ignore[override]
-    def backward(
-        ctx: FunctionCtx, grad_output: Tensor
-    ) -> Tuple[Tensor, None, None, None]:
+    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, None, None, None]:
         """Straight-through estimator.
 
         Args:
@@ -92,9 +87,7 @@ class StraightThroughClamp(Function):
 
     @staticmethod
     # type: ignore[override]
-    def backward(
-        ctx: FunctionCtx, d_output: Tensor
-    ) -> Tuple[Tensor, None, None, None, None]:
+    def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, None, None, None, None]:
         (clamped_mask,) = ctx.saved_tensors  # type: ignore[attr-defined]
         d_output[clamped_mask] = 0.0
         return d_output, None, None, None, None
@@ -148,15 +141,14 @@ class InputRangeForward(Function):
             if decay > 0:
                 # - We shrink the input range if less than X% of the inputs are clipping.
                 # where X is 1-ir_params.input_min_percentage
-                percentage = 1.0 - (upper_thresh | lower_thresh).sum().div(
-                    upper_thresh.numel()
-                )
+                percentage = 1.0 - (upper_thresh | lower_thresh).sum().div(upper_thresh.numel())
                 ir_grad += decay * input_range * (percentage > input_min_percentage)
 
         return d_output, ir_grad, None, None, None, None
 
 
 class TorchLinear:
+    """Linear layer with RPU support."""
 
     @staticmethod
     def linear(
@@ -170,7 +162,7 @@ class TorchLinear:
         in_sizes: List[int],
         training: bool,
         rpu_config: TorchInferenceRPUConfig,
-        apply_weight_modifier: bool
+        apply_weight_modifier: bool,
     ):
         """Forward function for the linear layer. Performs x @ W^T + b."""
         current_upper = 0
@@ -180,8 +172,9 @@ class TorchLinear:
 
             if rpu_config.pre_post.input_range.enable:
                 assert input_range is not None, "Input range must be provided"
-                assert input_range_update_idx is not None, \
-                    "Input range update index must be provided"
+                assert (
+                    input_range_update_idx is not None
+                ), "Input range update index must be provided"
 
                 if rpu_config.pre_post.input_range.fast_mode:
                     assert x_min is not None, "x_min must be provided"
@@ -219,9 +212,7 @@ class TorchLinear:
 
             # maybe do some quantization
             if rpu_config.forward.inp_res > 0:
-                inp_slice = UniformQuantize.apply(
-                    inp_slice, rpu_config.forward.inp_res, False
-                )
+                inp_slice = UniformQuantize.apply(inp_slice, rpu_config.forward.inp_res, False)
 
             # do we meed assumed_wmax per-column or per-tensor? or not at all?
             need_assumed_wmax = False
@@ -240,8 +231,7 @@ class TorchLinear:
                 reduce_assumed_wmax_for_weight_modifier = True
             elif (
                 apply_weight_modifier
-                and rpu_config.modifier.type
-                == WeightModifierType.ADD_NORMAL_PER_CHANNEL
+                and rpu_config.modifier.type == WeightModifierType.ADD_NORMAL_PER_CHANNEL
             ):
                 need_assumed_wmax = True
                 need_assumed_wmax_per_channel = True
@@ -254,11 +244,7 @@ class TorchLinear:
                         .amax(dim=1, keepdim=True)
                     )
                 else:
-                    assumed_wmax = (
-                        weights[:, current_upper : current_upper + inp_size]
-                        .abs()
-                        .max()
-                    )
+                    assumed_wmax = weights[:, current_upper : current_upper + inp_size].abs().max()
             else:
                 assumed_wmax = None
 
@@ -273,25 +259,17 @@ class TorchLinear:
                     rpu_config=rpu_config,
                 )
             else:
-                modified_slice = weights[
-                    :, current_upper : current_upper + inp_size
-                ]
+                modified_slice = weights[:, current_upper : current_upper + inp_size]
 
             out_slice = inp_slice @ modified_slice.T
 
             if training and rpu_config.forward.out_noise > 0:
-                assert (
-                    assumed_wmax is not None
-                ), "Assumed wmax must be provided for out noise"
+                assert assumed_wmax is not None, "Assumed wmax must be provided for out noise"
                 with no_grad():
                     # note that assumed_wmax has the correct shape here
                     if out_slice.ndim == 1:
                         assumed_wmax = assumed_wmax.view(-1)
-                    out_noise = (
-                        assumed_wmax
-                        * rpu_config.forward.out_noise
-                        * randn_like(out_slice)
-                    )
+                    out_noise = assumed_wmax * rpu_config.forward.out_noise * randn_like(out_slice)
                 out_slice += out_noise
 
             if rpu_config.pre_post.input_range.enable:
@@ -311,7 +289,7 @@ class TorchLinear:
         rpu_config: TorchInferenceRPUConfig,
         input_range: Tensor,
         input_range_update_idx: Tensor,
-        update_from_data: bool = False
+        update_from_data: bool = False,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """Apply the input clipping.
 
@@ -333,20 +311,15 @@ class TorchLinear:
                 std = values.std()
                 if std > 0.0:
                     input_range.data[slice_idx] = (
-                        input_range.data[slice_idx] * idx
-                        + ir_params.init_std_alpha * std
+                        input_range.data[slice_idx] * idx + ir_params.init_std_alpha * std
                     ) / (idx + 1)
                     input_range_update_idx[slice_idx] += 1
-                input_range.data[slice_idx] = input_range.data[
-                    slice_idx
-                ].abs()
+                input_range.data[slice_idx] = input_range.data[slice_idx].abs()
 
         input_range = input_range[slice_idx]
         upper_thresh = values >= input_range
         lower_thresh = values <= -input_range
-        x_clamped = StraightThroughClamp.apply(
-            values, upper_thresh, lower_thresh, input_range
-        )
+        x_clamped = StraightThroughClamp.apply(values, upper_thresh, lower_thresh, input_range)
         return x_clamped, upper_thresh, lower_thresh
 
     @staticmethod
@@ -358,7 +331,7 @@ class TorchLinear:
         input_range_update_idx: Tensor,
         x_min: Tensor,
         x_max: Tensor,
-        update_from_data: bool = False
+        update_from_data: bool = False,
     ) -> Tensor:
         """Fast updating and clipping without saving additional data for the BW.
 
@@ -379,17 +352,18 @@ class TorchLinear:
                     x_min = values.min()
                     x_max = values.max()
                     # initialization
-                    if (
-                        x_min[slice_idx].min() > -1.1e-5
-                        and x_max[slice_idx].max() < 1.1e-5
-                    ):
+                    if x_min[slice_idx].min() > -1.1e-5 and x_max[slice_idx].max() < 1.1e-5:
                         x_min[slice_idx] = x_min[slice_idx] + x_min
                         x_max[slice_idx] = x_max[slice_idx] + x_max
                     elif ir_params.act_range_momentum == -1:
-                        # type: ignore[call-overload]
-                        x_min[slice_idx] = min(x_min[slice_idx], x_min)
-                        # type: ignore[call-overload]
-                        x_max[slice_idx] = max(x_max[slice_idx], x_max)
+                        x_min[slice_idx] = min(
+                            x_min[slice_idx],
+                            x_min
+                        )  # type: ignore[call-overload]
+                        x_max[slice_idx] = max(
+                            x_max[slice_idx],
+                            x_max
+                        )  # type: ignore[call-overload]
                     else:
                         x_min[slice_idx] = x_min[
                             slice_idx
@@ -407,9 +381,7 @@ class TorchLinear:
                         x_min[slice_idx].abs(), x_max[slice_idx].abs()
                     )
 
-        x_clamped = clamp(
-            values, min=-input_range[slice_idx], max=input_range[slice_idx]
-        )
+        x_clamped = clamp(values, min=-input_range[slice_idx], max=input_range[slice_idx])
         return x_clamped
 
     @staticmethod
@@ -432,9 +404,7 @@ class TorchLinear:
         if modifier.type == WeightModifierType.NONE:
             return inp_weight
 
-        assert (
-            assumed_wmax is not None
-        ), "Assumed wmax must be provided for weight modifier"
+        assert assumed_wmax is not None, "Assumed wmax must be provided for weight modifier"
         if modifier.type in [
             WeightModifierType.DISCRETIZE,
             WeightModifierType.DISCRETIZE_ADD_NORMAL,
