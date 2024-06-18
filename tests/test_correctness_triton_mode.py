@@ -112,7 +112,7 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
     os.environ["AIHWKIT_DISABLE_TRITON"] = "1"
     # pure pytorch
     out = linear(inp)  # pylint: disable=not-callable
-    
+
     # with triton
     del os.environ["AIHWKIT_DISABLE_TRITON"]
     out_triton = linear(inp)  # pylint: disable=not-callable
@@ -135,5 +135,5 @@ if __name__ == "__main__":
         ir_init_from_data=100,
         ir_init_std_alpha=3.0,
         device="cuda",
-        dtype=float16
+        dtype=float16,
     )
