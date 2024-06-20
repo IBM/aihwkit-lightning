@@ -31,6 +31,7 @@ from torch import (
     Tensor,
     matmul,
     manual_seed,
+    arange
 )
 from torch.optim import AdamW
 from aihwkit_lightning.nn import AnalogLinear
@@ -100,6 +101,7 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
     rpu = populate_rpu(RPUConfig())
     linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
     linear = linear.eval()
+    linear.input_range.data = 1. + arange(len(linear.in_sizes))
     linear = linear.to(device=device, dtype=dtype)
 
     if num_inp_dims == 1:
@@ -109,26 +111,29 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
     else:
         inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype)
 
-    os.environ["AIHWKIT_DISABLE_TRITON"] = "1"
     # pure pytorch
     out = linear(inp)  # pylint: disable=not-callable
 
     # with triton
-    del os.environ["AIHWKIT_DISABLE_TRITON"]
+    os.environ["AIHWKIT_USE_TRITON"] = "1"
     out_triton = linear(inp)  # pylint: disable=not-callable
+    del os.environ["AIHWKIT_USE_TRITON"]
 
-    assert allclose(out_triton, out, atol=1e-5)
+    atol = 1e-5
+    if dtype == float16:
+        atol = 1e-2  # accumulation is slightly different in triton vs torch
+    assert allclose(out_triton, out, atol=atol)
 
 
 if __name__ == "__main__":
     test_linear_forward(
-        bsz=1,
-        num_inp_dims=1,
-        inp_size=4,
-        out_size=5,
+        bsz=256,
+        num_inp_dims=2,
+        inp_size=64,
+        out_size=256,
         bias=False,
         inp_res=254,
-        max_inp_size=2,
+        max_inp_size=20,
         ir_enable=True,
         ir_learn_input_range=True,
         ir_init_value=3.0,

@@ -280,6 +280,7 @@ class TorchLinear:
 
             current_upper += inp_size
 
+        out = out.to(dtype=weights.dtype)
         return out + bias if bias is not None else out
 
     @staticmethod
