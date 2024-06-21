@@ -16,7 +16,7 @@ import triton  # type: ignore
 import triton.language as tl  # type: ignore
 from torch.autograd import Function
 from torch.autograd.function import FunctionCtx
-from torch import Tensor, empty, tensor, float32
+from torch import Tensor, empty, tensor, float32, randint
 from aihwkit_lightning.nn.modules.triton_utils.abs_max import sliced_fast_abs_max
 from aihwkit_lightning.simulator.configs import (
     TorchInferenceRPUConfig,
@@ -59,6 +59,10 @@ def matmul_kernel(
     is_fp: tl.constexpr,
     is_float32: tl.constexpr,
     allow_tf32: tl.constexpr,
+    out_noise: tl.constexpr,
+    out_noise_seed: tl.constexpr,
+    out_noise_std: tl.constexpr,
+    out_noise_per_channel: tl.constexpr,
     # block sizes
     BLOCK_SIZE_INP: tl.constexpr,
     BLOCK_SIZE_HIDDEN: tl.constexpr,
@@ -71,60 +75,62 @@ def matmul_kernel(
     # BLOCK_SIZE_INP: 32 BLOCK_SIZE_HIDDEN: 16 BLOCK_SIZE_OUT: 32
     # Grid: 8 * 8 -> PIDs 0 1 2 3 ... 63
 
-    pid = tl.program_id(axis=0) # 16
-    num_pid_m = tl.cdiv(inp_size, BLOCK_SIZE_INP) # 8
-    num_pid_n = tl.cdiv(out_size, BLOCK_SIZE_OUT) # 8
-    num_pid_in_group = GROUP_SIZE_INP * num_pid_n # 2 * 8 = 16
-    group_id = pid // num_pid_in_group # 0 .. 15 belong to 0 and 16 .. 31 to 1 -> 1
-    first_pid_m = group_id * GROUP_SIZE_INP # 0
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_INP) # 2
-    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m) # 1
-    pid_n = (pid % num_pid_in_group) // group_size_m # 0
+    pid = tl.program_id(axis=0)  # 16
+    num_pid_m = tl.cdiv(inp_size, BLOCK_SIZE_INP)  # 8
+    num_pid_n = tl.cdiv(out_size, BLOCK_SIZE_OUT)  # 8
+    num_pid_in_group = GROUP_SIZE_INP * num_pid_n  # 2 * 8 = 16
+    group_id = pid // num_pid_in_group  # 0 .. 15 belong to 0 and 16 .. 31 to 1 -> 1
+    first_pid_m = group_id * GROUP_SIZE_INP  # 0
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_INP)  # 2
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)  # 1
+    pid_n = (pid % num_pid_in_group) // group_size_m  # 0
 
-    # [pid_m, pid_n] determines "x,y" coordinates of the result we compute
+    accumulator = tl.zeros(
+        (BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32 if is_float32 else tl.float16
+    )
 
-    # offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)) % inp_size
-    # offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
-    # offs_k = tl.arange(0, BLOCK_SIZE_HIDDEN)
-    # a_ptrs = inp_ptr + (offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size)
-    # b_ptrs = weights_ptr + (offs_k[:, None] * stride_weights_hidden_size + offs_bn[None, :] * stride_weights_out_size)
+    # for random number generation of output
+    increase_out_offsets_by = BLOCK_SIZE_INP * BLOCK_SIZE_OUT
+    output_random_offsets = tl.arange(0, BLOCK_SIZE_INP * BLOCK_SIZE_OUT).view(
+        (BLOCK_SIZE_INP, BLOCK_SIZE_OUT)
+    )
 
-    # accumulator = tl.zeros((BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32)
-    # for k in range(0, tl.cdiv(hidden_size, BLOCK_SIZE_HIDDEN)):
-    #     # Load the next block of A and B, generate a mask by checking the K dimension.
-    #     # If it is out of bounds, set it to 0.
-
-    #     a = tl.load(a_ptrs, mask=offs_k[None, :] < hidden_size - k * BLOCK_SIZE_HIDDEN, other=0.0)
-    #     b = tl.load(b_ptrs, mask=offs_k[:, None] < hidden_size - k * BLOCK_SIZE_HIDDEN, other=0.0)
-
-
-    #     # We accumulate along the K dimension.
-    #     accumulator = tl.dot(a, b, accumulator)
-    #     # Advance the ptrs to the next K block.
-    #     a_ptrs += BLOCK_SIZE_HIDDEN * stride_inp_hidden_size
-    #     b_ptrs += BLOCK_SIZE_HIDDEN * stride_weights_hidden_size
-
-
-
-    accumulator = tl.zeros((BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32 if is_float32 else tl.float16)
+    # Generate the pointers
+    offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)) % inp_size
+    offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
+    offs_assumed_wmax = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
 
     ir_range_lower = 0
     for slice_idx in range(0, num_slices):
 
+        # load the abs-max we need
+        abs_max_slice_ptrs = (
+            assumed_wmax_ptr
+            + slice_idx * stride_assumed_wmax_num_slices
+            + offs_bn * stride_assumed_wmax_out_size
+        )
+        assumed_wmax_per_slice = tl.load(
+            abs_max_slice_ptrs, mask=offs_assumed_wmax < out_size, other=1.0
+        )
+
         ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
         current_lower = ir_range_lower
 
-        # Generate the pointers
-        offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)) % inp_size
-        offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
-
-        for k in range(0, tl.cdiv(ir_range_upper-ir_range_lower, BLOCK_SIZE_HIDDEN)):
-            current_upper = min(ir_range_upper, current_lower + (k+1) * BLOCK_SIZE_HIDDEN, hidden_size)
+        num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
+        for k in range(0, num_k):
+            current_upper = min(
+                ir_range_upper, current_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
+            )
 
             offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
-            a_ptrs = inp_ptr + (offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size)
-            b_ptrs = weights_ptr + (offs_k[:, None] * stride_weights_hidden_size + offs_bn[None, :] * stride_weights_out_size)
-            
+            a_ptrs = inp_ptr + (
+                offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
+            )
+            b_ptrs = weights_ptr + (
+                offs_k[:, None] * stride_weights_hidden_size
+                + offs_bn[None, :] * stride_weights_out_size
+            )
+
             a = tl.load(a_ptrs, mask=offs_k[None, :] < current_upper, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < current_upper, other=0.0)
 
@@ -132,8 +138,8 @@ def matmul_kernel(
             input_range = tl.load(input_range_ptr + slice_idx)
 
             # clip between the input ranges
-            over_ir_mask = (a > input_range)
-            under_ir_mask = (a < -input_range)
+            over_ir_mask = a > input_range
+            under_ir_mask = a < -input_range
 
             a = tl.where(over_ir_mask, input_range, a)
             a = tl.where(under_ir_mask, -input_range, a)
@@ -142,17 +148,35 @@ def matmul_kernel(
             a = a / input_range
 
             if not is_fp:
-                # DEBUG needs to be removed
-                tl.device_assert(tl.max(tl.abs(a)) <= 1.0, "max abs is bigger 1.0")
                 a = a / inp_res
                 a = tl.extra.cuda.libdevice.rint(a)
                 a = a * inp_res
-            
+
             if not is_float32:
                 a = a.to(tl.float16)
                 b = b.to(tl.float16)
 
+            # do the MVM
             dot_prod = tl.dot(a, b, allow_tf32=allow_tf32)
+
+            if out_noise:
+                randn_block = tl.randn(out_noise_seed + pid, output_random_offsets)
+                if out_noise_per_channel:
+                    wmax = assumed_wmax_per_slice[None, :]
+                else:
+                    wmax = tl.max(assumed_wmax_per_slice)
+                # we add a N(0,1)*std/sqrt(N_slices * N_K)
+                randn_block = (
+                    wmax
+                    * out_noise_std
+                    / tl.sqrt(num_slices.to(tl.float32) * num_k.to(tl.float32))
+                    * randn_block
+                )
+                # add the noise
+                dot_prod += randn_block
+                # advance the output_random_offsets
+                output_random_offsets += increase_out_offsets_by
+
             # scale back with the input range
             dot_prod = input_range * dot_prod
 
@@ -165,18 +189,15 @@ def matmul_kernel(
 
         ir_range_lower = ir_range_upper
 
-
-    # You can fuse arbitrary activation functions here
-    # while the accumulator is still in FP32!
     c = accumulator
     if not is_float32:
         c = c.to(tl.float16)
 
-    # -----------------------------------------------------------
-    # Write back the block of the output matrix C with masks.
     offs_cm = pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)
     offs_cn = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
-    c_ptrs = out_ptr + stride_out_inp_size * offs_cm[:, None] + stride_out_out_size * offs_cn[None, :]
+    c_ptrs = (
+        out_ptr + stride_out_inp_size * offs_cm[:, None] + stride_out_out_size * offs_cn[None, :]
+    )
     c_mask = (offs_cm[:, None] < inp_size) & (offs_cn[None, :] < out_size)
     tl.store(c_ptrs, c, mask=c_mask)
 
@@ -210,7 +231,9 @@ class TritonLinear(Function):
 
         out_size, hidden_size = weights.shape
         inp_size = inp.size(0)
-        assert hidden_size == inp.size(1), f"Input hidden size is {inp.size(1)} but weight hidden size is {hidden_size}"
+        assert hidden_size == inp.size(
+            1
+        ), f"Input hidden size is {inp.size(1)} but weight hidden size is {hidden_size}"
 
         # invoke kernel
         def grid(meta):
@@ -226,6 +249,12 @@ class TritonLinear(Function):
         if inp_res > 0:
             inp_res = 2 / inp_res if inp_res > 1.0 else 2 * inp_res
             assert inp_res > 0, "resolution is <= 0"
+
+        # bring output noise variables into shape
+        out_noise = training and (not rpu_config.forward.out_noise == 0.0)
+        out_noise_std = rpu_config.forward.out_noise
+        out_noise_per_channel = rpu_config.forward.out_noise_per_channel
+        out_noise_seed = randint(2**31, (1,)).item()
 
         matmul_kernel[grid](
             inp,  # 2D [inp_size, hidden_size]
@@ -250,10 +279,14 @@ class TritonLinear(Function):
             assumed_wmax.stride(1),
             # for the other ptrs, we assume stride 1
             # miscellaneous
-            inp_res, # inp_res
-            inp_res == -1, # is_fp
+            inp_res,  # inp_res
+            inp_res == -1,  # is_fp
             inp.dtype == float32,
-            False, # allow_tf32 DEBUG.. Change to True in the end
+            False,  # allow_tf32 DEBUG.. Change to True in the end
+            out_noise,
+            out_noise_seed,
+            out_noise_std,
+            out_noise_per_channel,
             # block sizes
             32,
             16,
@@ -261,7 +294,7 @@ class TritonLinear(Function):
             2,
         )
         out = out.view(out_shape)
-        
+
         # import torch
         # ideal = inp @ weights.T
         # assert torch.allclose(out, ideal, atol=1e-3)

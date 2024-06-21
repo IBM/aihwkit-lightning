@@ -12,6 +12,7 @@
 
 """Functions for normal linear in PyTorch."""
 from typing import List, Tuple, Union
+from math import sqrt
 from torch import Tensor, randn_like, clamp, zeros_like
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
@@ -269,7 +270,17 @@ class TorchLinear:
                     # note that assumed_wmax has the correct shape here
                     if out_slice.ndim == 1:
                         assumed_wmax = assumed_wmax.view(-1)
-                    out_noise = assumed_wmax * rpu_config.forward.out_noise * randn_like(out_slice)
+                    wmax = (
+                        assumed_wmax
+                        if assumed_wmax.numel() == 1
+                        else assumed_wmax.view(-1, out_slice.size(-1))
+                    )
+                    out_noise = (
+                        wmax
+                        * rpu_config.forward.out_noise
+                        / sqrt(len(in_sizes))
+                        * randn_like(out_slice)
+                    )
                 out_slice += out_noise
 
             if rpu_config.pre_post.input_range.enable:
@@ -358,12 +369,10 @@ class TorchLinear:
                         x_max[slice_idx] = x_max[slice_idx] + x_max
                     elif ir_params.act_range_momentum == -1:
                         x_min[slice_idx] = min(
-                            x_min[slice_idx],
-                            x_min
+                            x_min[slice_idx], x_min
                         )  # type: ignore[call-overload]
                         x_max[slice_idx] = max(
-                            x_max[slice_idx],
-                            x_max
+                            x_max[slice_idx], x_max
                         )  # type: ignore[call-overload]
                     else:
                         x_min[slice_idx] = x_min[

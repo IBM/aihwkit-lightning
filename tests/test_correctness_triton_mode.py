@@ -31,7 +31,7 @@ from torch import (
     Tensor,
     matmul,
     manual_seed,
-    arange
+    arange,
 )
 from torch.optim import AdamW
 from aihwkit_lightning.nn import AnalogLinear
@@ -55,6 +55,8 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 # @mark.parametrize("ir_init_value", [2.0, 3.0])
 # @mark.parametrize("ir_init_from_data", [-1, 0, 10])
 # @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
+# @mark.parametrize("out_noise", [True, False])
+# @mark.parametrize("out_noise_per_channel", [True, False])
 # @mark.parametrize("device", ["cpu", "cuda"])
 # @mark.parametrize("dtype", [float32, float16, bfloat16])
 def test_linear_forward(  # pylint: disable=too-many-arguments
@@ -70,6 +72,8 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
     ir_init_value: float,
     ir_init_from_data: int,
     ir_init_std_alpha: float,
+    out_noise: bool,
+    out_noise_per_channel: bool,
     device: torch_device,
     dtype: torch_dtype,
 ):
@@ -89,7 +93,8 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
 
     def populate_rpu(rpu_config: RPUConfig):
         rpu_config.forward.inp_res = inp_res
-        rpu_config.forward.out_noise = 0.0
+        rpu_config.forward.out_noise = 0.03 if out_noise else 0.0
+        rpu_config.forward.out_noise_per_channel = out_noise_per_channel
         rpu_config.mapping.max_input_size = max_inp_size
         rpu_config.pre_post.input_range.enable = ir_enable
         rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
@@ -100,8 +105,15 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
 
     rpu = populate_rpu(RPUConfig())
     linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
-    linear = linear.eval()
-    linear.input_range.data = 1. + arange(len(linear.in_sizes))
+    # if out noise is to be tested, we don't want to be in eval mode
+    if out_noise:
+        assert (
+            ir_init_from_data == 0
+        ), "Updating IR on-the-fly not supported in triton at the moment"
+    else:
+        linear = linear.eval()
+
+    linear.input_range.data = 1.0 + arange(len(linear.in_sizes))
     linear = linear.to(device=device, dtype=dtype)
 
     if num_inp_dims == 1:
@@ -119,26 +131,53 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
     out_triton = linear(inp)  # pylint: disable=not-callable
     del os.environ["AIHWKIT_USE_TRITON"]
 
-    atol = 1e-5
-    if dtype == float16:
-        atol = 1e-2  # accumulation is slightly different in triton vs torch
-    assert allclose(out_triton, out, atol=atol)
+    if out_noise:
+        linear.rpu_config.forward.out_noise = 0.0
+        out_noise_free = linear(inp)  # pylint: disable=not-callable
+        delta_triton = out_triton - out_noise_free
+        delta_torch = out - out_noise_free
+        assert allclose(delta_torch.std(), delta_triton.std(), atol=1e-3)
+    else:
+        atol = 1e-5
+        if dtype == float16:
+            atol = 1e-2  # accumulation is slightly different in triton vs torch
+        assert allclose(out_triton, out, atol=atol)
 
 
 if __name__ == "__main__":
+    # test_linear_forward(
+    #     bsz=16,
+    #     num_inp_dims=2,
+    #     inp_size=256,
+    #     out_size=128,
+    #     bias=False,
+    #     inp_res=254,
+    #     max_inp_size=32,
+    #     ir_enable=True,
+    #     ir_learn_input_range=True,
+    #     ir_init_value=3.0,
+    #     ir_init_from_data=100,
+    #     ir_init_std_alpha=3.0,
+    #     out_noise=True,
+    #     out_noise_per_channel=True,
+    #     device="cuda",
+    #     dtype=float32,
+    # )
     test_linear_forward(
-        bsz=256,
+        bsz=100,
         num_inp_dims=2,
-        inp_size=64,
+        inp_size=128,
         out_size=256,
         bias=False,
         inp_res=254,
-        max_inp_size=20,
+        max_inp_size=32,
         ir_enable=True,
         ir_learn_input_range=True,
         ir_init_value=3.0,
-        ir_init_from_data=100,
+        ir_init_from_data=0,
         ir_init_std_alpha=3.0,
+        out_noise=True,
+        out_noise_per_channel=False,
         device="cuda",
-        dtype=float16,
+        dtype=float32,
     )
