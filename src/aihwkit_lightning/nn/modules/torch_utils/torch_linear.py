@@ -39,8 +39,16 @@ class UniformQuantize(Function):
             torch.Tensor: Quantized input.
         """
         # - Compute 1 / states if the number of states are provided
-        res = 2 / res if res > 1.0 else 2 * res
-        assert res > 0, "resolution is <= 0"
+        if isinstance(res, Tensor):
+            if res.ndim > 1:
+                assert res.size(0) == inp.size(
+                    0
+                ), f"res is tensor but first dim {res.size(0)} mismatches with first dim of input: {inp.size(0)}"
+            res = 2 / res if (res > 1.0).all() else 2 * res
+            assert (res > 0).all(), "resolution is <= 0"
+        else:
+            res = 2 / res if res > 1.0 else 2 * res
+            assert res > 0, "resolution is <= 0"
         output = inp if inplace else inp.clone()
         output = output / res
         # - Perform explicit rounding
@@ -230,10 +238,11 @@ class TorchLinear:
             ]:
                 need_assumed_wmax = True
                 reduce_assumed_wmax_for_weight_modifier = True
-            elif (
-                apply_weight_modifier
-                and rpu_config.modifier.type == WeightModifierType.ADD_NORMAL_PER_CHANNEL
-            ):
+            elif apply_weight_modifier and rpu_config.modifier.type in [
+                WeightModifierType.ADD_NORMAL_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+            ]:
                 need_assumed_wmax = True
                 need_assumed_wmax_per_channel = True
 
@@ -417,14 +426,19 @@ class TorchLinear:
         assert assumed_wmax is not None, "Assumed wmax must be provided for weight modifier"
         if modifier.type in [
             WeightModifierType.DISCRETIZE,
+            WeightModifierType.DISCRETIZE_PER_CHANNEL,
             WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
         ]:
             res = modifier.res
             n_states = max(res, 1 / res)
             # assumed_wamax.item() would result in fp16 imprecision
             res = assumed_wmax / n_states  # type: ignore[assignment]
 
-        if modifier.type == WeightModifierType.DISCRETIZE:
+        if modifier.type in [
+            WeightModifierType.DISCRETIZE,
+            WeightModifierType.DISCRETIZE_PER_CHANNEL,
+        ]:
             # - Discretize the weights on the fly and backprob through them
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
         elif modifier.type in [
@@ -434,7 +448,10 @@ class TorchLinear:
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
-        elif modifier.type == WeightModifierType.DISCRETIZE_ADD_NORMAL:
+        elif modifier.type in [
+            WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+        ]:
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)

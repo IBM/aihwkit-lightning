@@ -18,11 +18,117 @@ from torch.autograd import Function
 from torch.autograd.function import FunctionCtx
 from torch import Tensor, empty, tensor, float32, randint
 from aihwkit_lightning.nn.modules.triton_utils.abs_max import sliced_fast_abs_max
-from aihwkit_lightning.simulator.configs import (
-    TorchInferenceRPUConfig,
-    WeightClipType,
-    WeightModifierType,
-)
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
+
+
+# @triton.autotune(
+#     configs=[triton.Config(
+#     {"BLOCK_SIZE_HIDDEN": 32, "BLOCK_SIZE_OUT": 128},
+#     num_warps=8, num_stages=0)],
+#     key=["hidden_size", "out_size"],
+# )
+@triton.jit
+def modifier_kernel(
+    # pointers to tensors
+    weights_ptr,  # 2D [hidden_size, out_size]
+    assumed_wmax_ptr,  # 2D [num_slices, out_size]
+    reduced_assumed_wmax_ptr,  # 2D [num_slices, 1]
+    upper_end_of_slices_ptr,  # 1D [num_slices]
+    # sizes
+    hidden_size,
+    out_size,
+    num_slices,
+    # strides
+    stride_weights_hidden_size,
+    stride_weights_out_size,
+    stride_assumed_wmax_num_slices,
+    stride_assumed_wmax_out_size,
+    # miscellaneous
+    modifier_type: tl.constexpr,  # str
+    modifier_weight_res: tl.constexpr,  # float
+    modifier_seed: tl.constexpr,  # int
+    modifier_std: tl.constexpr,  # float
+    # block sizes
+    BLOCK_SIZE_HIDDEN: tl.constexpr,
+    BLOCK_SIZE_OUT: tl.constexpr,
+):
+    pid = tl.program_id(axis=0)
+    offs_bn = (pid * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
+    offs_assumed_wmax = pid * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
+
+    # for random number generation of output
+    increase_weight_offsets_by = BLOCK_SIZE_HIDDEN * BLOCK_SIZE_OUT
+    weight_random_offsets = tl.arange(0, BLOCK_SIZE_HIDDEN * BLOCK_SIZE_OUT).reshape(
+        (BLOCK_SIZE_HIDDEN, BLOCK_SIZE_OUT), can_reorder=True
+    )
+
+    ir_range_lower = 0
+    for slice_idx in range(0, num_slices):
+
+        # load the abs-max we need
+        abs_max_slice_ptrs = (
+            assumed_wmax_ptr
+            + slice_idx * stride_assumed_wmax_num_slices
+            + offs_bn * stride_assumed_wmax_out_size
+        )
+        if modifier_type == "AddNormal" or (
+            modifier_type == "Discretize" or modifier_type == "DiscretizeAddNormal"
+        ):
+            assumed_wmax_per_slice = tl.load(reduced_assumed_wmax_ptr + slice_idx)
+        else:
+            assumed_wmax_per_slice = tl.load(
+                abs_max_slice_ptrs, mask=offs_assumed_wmax < out_size, other=float("-inf")
+            )
+            assumed_wmax_per_slice = assumed_wmax_per_slice[None, :]
+
+        ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
+        current_lower = ir_range_lower
+
+        num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
+        for k in range(0, num_k):
+            current_upper = min(
+                ir_range_upper, current_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
+            )
+
+            offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
+
+            b_ptrs = weights_ptr + (
+                offs_k[:, None] * stride_weights_hidden_size
+                + offs_bn[None, :] * stride_weights_out_size
+            )
+
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < current_upper, other=0.0)
+
+            if (modifier_type == "Discretize" or modifier_type == "DiscretizeAddNormal") or (
+                modifier_type == "DiscretizePerChannel"
+                or modifier_type == "DiscretizeAddNormalPerChannel"
+            ):
+                if modifier_weight_res > 0:
+                    n_states = max(modifier_weight_res, 1 / modifier_weight_res)
+                    res = 2 * assumed_wmax_per_slice / n_states
+                    b = b / res
+                    b = tl.extra.cuda.libdevice.rint(b)
+                    b = b * res
+
+            if (modifier_type == "AddNormal" or modifier_type == "AddNormalPerChannel") or (
+                modifier_type == "DiscretizeAddNormal"
+                or modifier_type == "DiscretizeAddNormalPerChannel"
+            ):
+                randn_block = tl.randn(modifier_seed + pid, weight_random_offsets)
+                weight_random_offsets += increase_weight_offsets_by
+                randn_block = assumed_wmax_per_slice * modifier_std * randn_block
+                b += randn_block
+
+            # store b back to DRAM...
+            tl.store(
+                b_ptrs,
+                b,
+                mask=(offs_k[:, None] < current_upper) & (offs_assumed_wmax[None, :] < out_size),
+            )
+
+            current_lower = current_upper
+
+        ir_range_lower = ir_range_upper
 
 
 # @triton.autotune(
@@ -38,6 +144,7 @@ def matmul_kernel(
     weights_ptr,  # 2D [hidden_size, out_size]
     out_ptr,  # 2D [inp_size, out_size]
     assumed_wmax_ptr,  # 2D [num_slices, out_size]
+    reduced_assumed_wmax_ptr,  # 2D [num_slices, 1]
     input_range_ptr,  # 1D [num_slices]
     upper_end_of_slices_ptr,  # 1D [num_slices]
     # sizes
@@ -91,8 +198,8 @@ def matmul_kernel(
 
     # for random number generation of output
     increase_out_offsets_by = BLOCK_SIZE_INP * BLOCK_SIZE_OUT
-    output_random_offsets = tl.arange(0, BLOCK_SIZE_INP * BLOCK_SIZE_OUT).view(
-        (BLOCK_SIZE_INP, BLOCK_SIZE_OUT)
+    output_random_offsets = tl.arange(0, BLOCK_SIZE_INP * BLOCK_SIZE_OUT).reshape(
+        (BLOCK_SIZE_INP, BLOCK_SIZE_OUT), can_reorder=True
     )
 
     # Generate the pointers
@@ -109,9 +216,14 @@ def matmul_kernel(
             + slice_idx * stride_assumed_wmax_num_slices
             + offs_bn * stride_assumed_wmax_out_size
         )
-        assumed_wmax_per_slice = tl.load(
-            abs_max_slice_ptrs, mask=offs_assumed_wmax < out_size, other=1.0
-        )
+
+        if out_noise and out_noise_per_channel:
+            assumed_wmax_per_slice = tl.load(
+                abs_max_slice_ptrs, mask=offs_assumed_wmax < out_size, other=float("-inf")
+            )
+            assumed_wmax_per_slice = assumed_wmax_per_slice[None, :]
+        else:
+            assumed_wmax_per_slice = tl.load(reduced_assumed_wmax_ptr + slice_idx)
 
         ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
         current_lower = ir_range_lower
@@ -161,13 +273,9 @@ def matmul_kernel(
 
             if out_noise:
                 randn_block = tl.randn(out_noise_seed + pid, output_random_offsets)
-                if out_noise_per_channel:
-                    wmax = assumed_wmax_per_slice[None, :]
-                else:
-                    wmax = tl.max(assumed_wmax_per_slice)
                 # we add a N(0,1)*std/sqrt(N_slices * N_K)
                 randn_block = (
-                    wmax
+                    assumed_wmax_per_slice
                     * out_noise_std
                     / tl.sqrt(num_slices.to(tl.float32) * num_k.to(tl.float32))
                     * randn_block
@@ -221,6 +329,9 @@ class TritonLinear(Function):
         assumed_wmax = sliced_fast_abs_max(weights=weights, split_sizes=in_sizes)
         assert assumed_wmax.is_contiguous(), "assumed_wmax not contiguous"
 
+        reduced_assumed_wmax = assumed_wmax.amax(dim=1, keepdim=True)
+        assert reduced_assumed_wmax.is_contiguous(), "reduced_assumed_wmax is not contiguous"
+
         upper_end_of_slices = (
             tensor(in_sizes, device=inp.device, dtype=inp.dtype).cumsum(dim=0).contiguous().int()
         )
@@ -235,6 +346,40 @@ class TritonLinear(Function):
             1
         ), f"Input hidden size is {inp.size(1)} but weight hidden size is {hidden_size}"
 
+        def weight_modifier_grid(meta):
+            return (triton.cdiv(out_size, meta["BLOCK_SIZE_OUT"]),)
+
+        if apply_weight_modifier:
+            modifier_std = rpu_config.modifier.std_dev
+            modifier_seed = randint(2**31, (1,)).item()
+            # bring the weight resolution into a state that we can interpret
+            modifier_weight_res = rpu_config.modifier.res
+
+            modifier_kernel[weight_modifier_grid](
+                # pointers to tensors
+                weights.T,  # 2D [hidden_size, out_size]
+                assumed_wmax,  # 2D [num_slices, out_size]
+                reduced_assumed_wmax,  # 2D [num_slices, 1]
+                upper_end_of_slices,  # 1D [num_slices]
+                # sizes
+                hidden_size,
+                out_size,
+                num_slices,
+                # strides
+                weights.stride(1),  # flipped because of transpose
+                weights.stride(0),
+                assumed_wmax.stride(0),
+                assumed_wmax.stride(1),
+                # miscellaneous
+                rpu_config.modifier.type.value,
+                modifier_weight_res,
+                modifier_seed,
+                modifier_std,
+                # block sizes
+                16,
+                32,
+            )
+
         # invoke kernel
         def grid(meta):
             return (
@@ -247,7 +392,7 @@ class TritonLinear(Function):
         # bring the input resolution into a state that we can interpret
         inp_res = rpu_config.forward.inp_res
         if inp_res > 0:
-            inp_res = 2 / inp_res if inp_res > 1.0 else 2 * inp_res
+            inp_res = 2.0 / inp_res if inp_res > 1.0 else 2.0 * inp_res
             assert inp_res > 0, "resolution is <= 0"
 
         # bring output noise variables into shape
@@ -261,6 +406,7 @@ class TritonLinear(Function):
             weights.T,  # 2D [hidden_size, out_size]
             out,  # 2D [inp_size, out_size]
             assumed_wmax,  # 2D [num_slices, out_size]
+            reduced_assumed_wmax,  # 2D [num_slices, 1]
             input_range,  # 1D [num_slices]
             upper_end_of_slices,  # 1D [num_slices]
             # sizes
@@ -294,11 +440,6 @@ class TritonLinear(Function):
             2,
         )
         out = out.view(out_shape)
-
-        # import torch
-        # ideal = inp @ weights.T
-        # assert torch.allclose(out, ideal, atol=1e-3)
-
         return out
 
     @staticmethod
