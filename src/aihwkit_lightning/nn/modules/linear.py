@@ -111,6 +111,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
                 inp,
                 modified_weights,
                 self.input_range,
+                self.input_range_update_idx,
                 self.in_sizes,
                 self.rpu_config,
                 self.training,

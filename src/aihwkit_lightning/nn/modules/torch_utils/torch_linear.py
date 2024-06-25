@@ -74,6 +74,46 @@ class UniformQuantize(Function):
         return grad_input, None, None, None
 
 
+# class DebugFn(Function):
+#     @staticmethod
+#     def forward(
+#         ctx: FunctionCtx,
+#         inp: Tensor,
+#         ir: Tensor,
+#     ) -> Tensor:
+#         ctx.save_for_backward(ir, inp)
+#         return inp / ir
+
+#     @staticmethod
+#     # type: ignore[override]
+#     def backward(ctx: FunctionCtx, d_output: Tensor):
+#         ir, inp = ctx.saved_tensors
+#         ir_grad = d_output * inp * (- 1 / ir**2)
+#         ir_grad = ir_grad.sum()
+#         # return d_output / ir, None
+#         return d_output / ir, ir_grad
+
+
+# class DebugFn2(Function):
+#     @staticmethod
+#     def forward(
+#         ctx: FunctionCtx,
+#         inp: Tensor,
+#         ir: Tensor,
+#     ) -> Tensor:
+#         ctx.save_for_backward(ir, inp)
+#         return inp * ir
+
+#     @staticmethod
+#     # type: ignore[override]
+#     def backward(ctx: FunctionCtx, d_output: Tensor):
+#         ir, inp = ctx.saved_tensors
+#         ir_grad = d_output * inp
+#         ir_grad = ir_grad.sum()
+#         # return d_output * ir, None
+#         return d_output * ir, ir_grad
+
+
 class StraightThroughClamp(Function):
     """
     Straight-through clamp function.
@@ -129,6 +169,11 @@ class InputRangeForward(Function):
     def backward(
         ctx: FunctionCtx, d_output: Tensor
     ) -> Tuple[Tensor, Tensor, None, None, None, None]:
+
+        # DEBUG
+        import pydevd
+
+        pydevd.settrace(suspend=False, trace_only_current_thread=True)
 
         upper_thresh: Tensor
         lower_thresh: Tensor
@@ -217,6 +262,9 @@ class TorchLinear:
                         rpu_config.pre_post.input_range.decay,
                         rpu_config.pre_post.input_range.input_min_percentage,
                     )
+
+                    # inp_slice = DebugFn.apply(inp_slice, input_range[slice_idx])
+
                     inp_slice = inp_slice / input_range[slice_idx]
 
             # maybe do some quantization
@@ -295,6 +343,8 @@ class TorchLinear:
             if rpu_config.pre_post.input_range.enable:
                 assert input_range is not None, "Input range must be provided"
                 out_slice *= input_range[slice_idx]
+
+                # out_slice = DebugFn2.apply(out_slice, input_range[slice_idx])
 
             out += out_slice  # type: ignore[assignment]
 

@@ -16,8 +16,9 @@ import triton  # type: ignore
 import triton.language as tl  # type: ignore
 from torch.autograd import Function
 from torch.autograd.function import FunctionCtx
-from torch import Tensor, empty, tensor, float32, randint
-from aihwkit_lightning.nn.modules.triton_utils.abs_max import sliced_fast_abs_max
+from torch import Tensor, empty, tensor, float32, randint, zeros_like, clamp
+from aihwkit_lightning.nn.modules.triton_utils.triton_abs_max import sliced_fast_abs_max
+from aihwkit_lightning.nn.modules.triton_utils.triton_std import sliced_fast_std
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 
@@ -143,6 +144,7 @@ def matmul_kernel(
     inp_ptr,  # 2D [inp_size, hidden_size]
     weights_ptr,  # 2D [hidden_size, out_size]
     out_ptr,  # 2D [inp_size, out_size]
+    ir_vector_ptr,  # 1D [hidden_size]
     assumed_wmax_ptr,  # 2D [num_slices, out_size]
     reduced_assumed_wmax_ptr,  # 2D [num_slices, 1]
     input_range_ptr,  # 1D [num_slices]
@@ -170,6 +172,7 @@ def matmul_kernel(
     out_noise_seed: tl.constexpr,
     out_noise_std: tl.constexpr,
     out_noise_per_channel: tl.constexpr,
+    ir_vector_is_none: tl.constexpr,
     # block sizes
     BLOCK_SIZE_INP: tl.constexpr,
     BLOCK_SIZE_HIDDEN: tl.constexpr,
@@ -249,6 +252,10 @@ def matmul_kernel(
             # load the correct input range
             input_range = tl.load(input_range_ptr + slice_idx)
 
+            if not ir_vector_is_none:
+                # save the correct IR per dimension in the hidden
+                tl.store(ir_vector_ptr + offs_k, input_range, mask=offs_k < current_upper)
+
             # clip between the input ranges
             over_ir_mask = a > input_range
             under_ir_mask = a < -input_range
@@ -317,6 +324,7 @@ class TritonLinear(Function):
         inp: Tensor,
         weights: Tensor,
         input_range: Tensor,
+        input_range_update_idx: Tensor,
         in_sizes: List[int],
         rpu_config: TorchInferenceRPUConfig,
         training: bool,
@@ -339,6 +347,22 @@ class TritonLinear(Function):
         out_shape = (*inp.shape[:-1], weights.size(0))
         inp = inp.flatten(end_dim=-2)
         num_slices = len(input_range)
+
+        # update the input ranges if necessary
+        if training:
+            ir_params = rpu_config.pre_post.input_range
+            if (input_range_update_idx < ir_params.init_from_data).any():
+                stds = sliced_fast_std(inp, upper_end_of_slices)
+                for slice_idx in range(num_slices):
+                    idx = input_range_update_idx[slice_idx]
+                    if idx < ir_params.init_from_data:
+                        if stds[slice_idx] > 0.0:
+                            input_range.data[slice_idx] = (
+                                input_range.data[slice_idx] * idx
+                                + ir_params.init_std_alpha * stds[slice_idx]
+                            ) / (idx + 1)
+                            input_range_update_idx[slice_idx] += 1
+                        input_range.data[slice_idx] = input_range.data[slice_idx].abs()
 
         out_size, hidden_size = weights.shape
         inp_size = inp.size(0)
@@ -401,10 +425,15 @@ class TritonLinear(Function):
         out_noise_per_channel = rpu_config.forward.out_noise_per_channel
         out_noise_seed = randint(2**31, (1,)).item()
 
+        # we fill this vector with the element wise IR
+        ir_vector = empty((1, hidden_size), device=inp.device, dtype=inp.dtype)
+        ir_vector = ir_vector.contiguous()
+
         matmul_kernel[grid](
             inp,  # 2D [inp_size, hidden_size]
             weights.T,  # 2D [hidden_size, out_size]
             out,  # 2D [inp_size, out_size]
+            ir_vector,  # 1D [hidden_size]
             assumed_wmax,  # 2D [num_slices, out_size]
             reduced_assumed_wmax,  # 2D [num_slices, 1]
             input_range,  # 1D [num_slices]
@@ -433,15 +462,71 @@ class TritonLinear(Function):
             out_noise_seed,
             out_noise_std,
             out_noise_per_channel,
+            False,  # ir_vector is None
             # block sizes
-            32,
+            32,  # DEBUG! Autotune...
             16,
             32,
             2,
         )
+
+        # save some stuff for backwards
+        ctx.in_sizes = in_sizes
+        ctx.rpu_config = rpu_config
+        ctx.save_for_backward(inp, weights, input_range, ir_vector, upper_end_of_slices)
+
         out = out.view(out_shape)
         return out
 
     @staticmethod
     def backward(ctx: FunctionCtx, grad_output: Tensor):  # type: ignore
-        pass
+        # DEBUG
+        import pydevd
+
+        pydevd.settrace(suspend=False, trace_only_current_thread=True)
+
+        in_sizes: List[int]
+        in_sizes = ctx.in_sizes
+
+        rpu_config: TorchInferenceRPUConfig
+        rpu_config = ctx.rpu_config
+        inp, weights, input_range, ir_vector, upper_end_of_slices = ctx.saved_tensors
+
+        weights: Tensor
+        grad_inp_shape = (*grad_output.shape[:-1], weights.size(1))
+        grad_output = grad_output.flatten(end_dim=-2)
+
+        # bring the input resolution into a state that we can interpret
+        inp_res = rpu_config.forward.inp_res
+        if inp_res > 0:
+            inp_res = 2.0 / inp_res if inp_res > 1.0 else 2.0 * inp_res
+            assert inp_res > 0, "resolution is <= 0"
+
+        # input gradient
+        inp: Tensor
+        ir_vector: Tensor
+        inp_rounded = inp.clamp(-ir_vector, ir_vector)
+        if inp_res > 0:
+            scale = ir_vector * inp_res
+            inp_rounded = (inp_rounded / scale).round() * scale
+        grad_w = grad_output.T @ inp_rounded
+        grad_inp = grad_output @ weights
+        grad_inp = grad_inp.view(grad_inp_shape)
+
+        # ir gradient
+        decay = rpu_config.pre_post.input_range.decay  # type: ignore[attr-defined]
+        input_min_percentage = rpu_config.pre_post.input_range.input_min_percentage  # type: ignore[attr-defined]
+
+        upper_thresh = (inp >= ir_vector).view_as(grad_inp)
+        lower_thresh = (inp <= -ir_vector).view_as(grad_inp)
+        ir_grad = zeros_like(input_range)
+        ir_grad += clamp(grad_inp[upper_thresh], min=None, max=0.0).sum()
+        ir_grad -= clamp(grad_inp[lower_thresh], min=0.0, max=None).sum()
+        ir_grad *= input_range
+        if decay > 0:
+            # - We shrink the input range if less than X% of the inputs are clipping.
+            # where X is 1-ir_params.input_min_percentage
+            percentage = 1.0 - (upper_thresh | lower_thresh).sum().div(upper_thresh.numel())
+            ir_grad += decay * input_range * (percentage > input_min_percentage)
+
+        return grad_inp, grad_w, ir_grad, None, None, None, None, None

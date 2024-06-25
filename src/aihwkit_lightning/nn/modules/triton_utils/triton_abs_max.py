@@ -347,7 +347,7 @@ if __name__ == "__main__":
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=["n_cols", "n_rows"],
-            x_vals=[128 * i for i in range(2, 33)],
+            x_vals=[128 * i for i in range(8, 40, 4)],
             line_arg="provider",
             line_vals=["torch", "triton"],
             line_names=["PyTorch", "Triton"],
@@ -369,6 +369,7 @@ if __name__ == "__main__":
         Returns:
             Tuple[float]: Median, min, max of the runtimes in ms
         """
+        print(f"{provider}: Hidden size {n_cols}")
         weights = randn((n_cols, n_rows), device="cuda", dtype=float16)
         split_sizes = get_split_size(n_rows, max_size=128)
 
