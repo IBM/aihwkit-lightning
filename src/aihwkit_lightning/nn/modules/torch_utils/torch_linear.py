@@ -319,6 +319,7 @@ class TorchLinear:
             else:
                 modified_slice = weights[:, current_upper : current_upper + inp_size]
 
+            print("inp_slice", inp_slice)
             out_slice = inp_slice @ modified_slice.T
 
             if training and rpu_config.forward.out_noise > 0:

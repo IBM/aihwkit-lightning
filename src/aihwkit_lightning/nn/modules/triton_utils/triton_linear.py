@@ -206,8 +206,10 @@ def matmul_kernel(
     )
 
     # Generate the pointers
-    offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)) % inp_size
-    offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
+    # offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)) % inp_size
+    # offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
+    offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP))
+    offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT))
     offs_assumed_wmax = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
 
     ir_range_lower = 0
@@ -246,8 +248,8 @@ def matmul_kernel(
                 + offs_bn[None, :] * stride_weights_out_size
             )
 
-            a = tl.load(a_ptrs, mask=offs_k[None, :] < current_upper, other=0.0)
-            b = tl.load(b_ptrs, mask=offs_k[:, None] < current_upper, other=0.0)
+            a = tl.load(a_ptrs, mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper), other=0.0)
+            b = tl.load(b_ptrs, mask=(offs_k[:, None] < current_upper) & (offs_bn[None, :] < out_size), other=0.0)
 
             # load the correct input range
             input_range = tl.load(input_range_ptr + slice_idx)
@@ -277,6 +279,8 @@ def matmul_kernel(
 
             # do the MVM
             dot_prod = tl.dot(a, b, allow_tf32=allow_tf32)
+            if (slice_idx == 0 and k == 0) and pid == 0: tl.device_print("a", a)
+            if (slice_idx == 0 and k == 0) and pid == 0: tl.device_print("b", b)
 
             if out_noise:
                 randn_block = tl.randn(out_noise_seed + pid, output_random_offsets)
@@ -467,8 +471,8 @@ class TritonLinear(Function):
             False,  # ir_vector is None
             # block sizes
             32,  # DEBUG! Autotune...
+            64,
             16,
-            32,
             2,
         )
 

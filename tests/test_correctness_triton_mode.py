@@ -262,13 +262,25 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     inp_triton = empty_like(inp, requires_grad=True)
     inp_triton.data = inp.data.clone()
 
-    out: Tensor
-    out = linear(inp)  # pylint: disable=not-callable
+    from torch import load, set_printoptions
+    set_printoptions(precision=6)
+    inp = load("problematic_vec.th")
+    inp: Tensor
+    start = 0; stop = 200
+    inp = inp[start:stop].view(1, -1)
+    inp_triton = inp.clone()
+    linear.weight.data = linear.weight[0, start:stop].view(1, -1)
+    linear.bias.data = linear.bias[0]
+    linear_triton.weight.data = linear_triton.weight[0, start:stop].view(1, -1)
+    linear_triton.bias.data = linear_triton.bias[0]
 
     os.environ["AIHWKIT_USE_TRITON"] = "1"
     out_triton: Tensor
     out_triton = linear_triton(inp_triton)  # pylint: disable=not-callable
     del os.environ["AIHWKIT_USE_TRITON"]
+
+    out: Tensor
+    out = linear(inp)  # pylint: disable=not-callable
 
     atol = 1e-4 if dtype == float32 else 1e-2
     assert allclose(out, out_triton, atol=atol)
@@ -289,7 +301,6 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
 
 
 if __name__ == "__main__":
-    # inp_size 65 max_inp_size 64 fails
     test_input_range_backward(
         bsz=10,
         num_inp_dims=3,
