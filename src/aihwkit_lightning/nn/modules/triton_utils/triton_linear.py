@@ -234,7 +234,7 @@ def matmul_kernel(
         num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
         for k in range(0, num_k):
             current_upper = min(
-                ir_range_upper, current_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
+                ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
 
             offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
@@ -345,6 +345,8 @@ class TritonLinear(Function):
         )
 
         out_shape = (*inp.shape[:-1], weights.size(0))
+        if inp.ndim == 1:
+            inp = inp.view(1, -1)
         inp = inp.flatten(end_dim=-2)
         num_slices = len(input_range)
 
@@ -480,10 +482,9 @@ class TritonLinear(Function):
 
     @staticmethod
     def backward(ctx: FunctionCtx, grad_output: Tensor):  # type: ignore
-        # DEBUG
-        import pydevd
-
-        pydevd.settrace(suspend=False, trace_only_current_thread=True)
+        # # DEBUG
+        # import pydevd
+        # pydevd.settrace(suspend=False, trace_only_current_thread=True)
 
         in_sizes: List[int]
         in_sizes = ctx.in_sizes
@@ -494,6 +495,8 @@ class TritonLinear(Function):
 
         weights: Tensor
         grad_inp_shape = (*grad_output.shape[:-1], weights.size(1))
+        if grad_output.ndim == 1:
+            grad_output = grad_output.view(1, -1)
         grad_output = grad_output.flatten(end_dim=-2)
 
         # bring the input resolution into a state that we can interpret
@@ -523,10 +526,12 @@ class TritonLinear(Function):
         ir_grad += clamp(grad_inp[upper_thresh], min=None, max=0.0).sum()
         ir_grad -= clamp(grad_inp[lower_thresh], min=0.0, max=None).sum()
         ir_grad *= input_range
+        did_clamp_mask = upper_thresh | lower_thresh
         if decay > 0:
             # - We shrink the input range if less than X% of the inputs are clipping.
             # where X is 1-ir_params.input_min_percentage
-            percentage = 1.0 - (upper_thresh | lower_thresh).sum().div(upper_thresh.numel())
+            percentage = 1.0 - (did_clamp_mask).sum().div(upper_thresh.numel())
             ir_grad += decay * input_range * (percentage > input_min_percentage)
 
+        grad_inp[did_clamp_mask] = 0.0
         return grad_inp, grad_w, ir_grad, None, None, None, None, None
