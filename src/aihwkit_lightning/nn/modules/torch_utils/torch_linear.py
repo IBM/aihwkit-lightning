@@ -57,7 +57,7 @@ class UniformQuantize(Function):
         if not skip_rounding:
             output = output.round()
         else:
-            is_testing =  os.environ.get("AIHWKIT_TESTING", False)
+            is_testing = os.environ.get("AIHWKIT_TESTING", False)
             if not is_testing:
                 del os.environ["_AIHWKIT_NO_ROUNDING"]
                 assert is_testing, "_AIHWKIT_NO_ROUNDING was set but we are not in testing mode."

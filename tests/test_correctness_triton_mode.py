@@ -324,5 +324,5 @@ if __name__ == "__main__":
         WeightModifierType.NONE,
         254,
         "cuda",
-        float32
+        float32,
     )

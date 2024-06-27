@@ -24,23 +24,18 @@ from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 
 @triton.autotune(
-configs=[triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3,
-                    num_warps=8),
-    triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5,
-                    num_warps=2),
-    triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5,
-                    num_warps=2)],
-key=["hidden_size", "out_size"])
+    configs=[
+        triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),
+        triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
+        triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
+        triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
+        triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
+        triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
+        triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5, num_warps=2),
+        triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5, num_warps=2),
+    ],
+    key=["hidden_size", "out_size"],
+)
 @triton.jit
 def modifier_kernel(
     # pointers to tensors
@@ -146,23 +141,90 @@ def modifier_kernel(
 
 
 @triton.autotune(
-configs=[triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64, "GROUP_SIZE_INP": 8}, num_stages=3,
-                    num_warps=8),
-    triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
-                    num_warps=4),
-    triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=5,
-                    num_warps=2),
-    triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=5,
-                    num_warps=2)],
-key=["inp_size", "hidden_size", "out_size"])
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 128,
+                "BLOCK_SIZE_OUT": 256,
+                "BLOCK_SIZE_HIDDEN": 64,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=3,
+            num_warps=8,
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 64,
+                "BLOCK_SIZE_OUT": 256,
+                "BLOCK_SIZE_HIDDEN": 32,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 128,
+                "BLOCK_SIZE_OUT": 128,
+                "BLOCK_SIZE_HIDDEN": 32,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 128,
+                "BLOCK_SIZE_OUT": 64,
+                "BLOCK_SIZE_HIDDEN": 32,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 64,
+                "BLOCK_SIZE_OUT": 128,
+                "BLOCK_SIZE_HIDDEN": 32,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 128,
+                "BLOCK_SIZE_OUT": 32,
+                "BLOCK_SIZE_HIDDEN": 32,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=4,
+            num_warps=4,
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 64,
+                "BLOCK_SIZE_OUT": 32,
+                "BLOCK_SIZE_HIDDEN": 32,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=5,
+            num_warps=2,
+        ),
+        triton.Config(
+            {
+                "BLOCK_SIZE_INP": 32,
+                "BLOCK_SIZE_OUT": 64,
+                "BLOCK_SIZE_HIDDEN": 32,
+                "GROUP_SIZE_INP": 8,
+            },
+            num_stages=5,
+            num_warps=2,
+        ),
+    ],
+    key=["inp_size", "hidden_size", "out_size"],
+)
 @triton.jit
 def matmul_kernel(
     # pointers to tensors
@@ -231,8 +293,8 @@ def matmul_kernel(
     )
 
     # Generate the pointers
-    offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP))
-    offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT))
+    offs_am = pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)
+    offs_bn = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
     offs_assumed_wmax = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
 
     ir_range_lower = 0
@@ -274,8 +336,16 @@ def matmul_kernel(
                 + offs_bn[None, :] * stride_weights_out_size
             )
 
-            a = tl.load(a_ptrs, mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper), other=0.0)
-            b = tl.load(b_ptrs, mask=(offs_k[:, None] < current_upper) & (offs_bn[None, :] < out_size), other=0.0)
+            a = tl.load(
+                a_ptrs,
+                mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper),
+                other=0.0,
+            )
+            b = tl.load(
+                b_ptrs,
+                mask=(offs_k[:, None] < current_upper) & (offs_bn[None, :] < out_size),
+                other=0.0,
+            )
 
             if not ir_vector_is_none:
                 # save the correct IR per dimension in the hidden
