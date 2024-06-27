@@ -11,6 +11,7 @@
 # that they have been altered from the originals.
 
 """Functions for normal linear in PyTorch."""
+import os
 from typing import List, Tuple, Union
 from math import sqrt
 from torch import Tensor, randn_like, clamp, zeros_like
@@ -52,7 +53,14 @@ class UniformQuantize(Function):
         output = inp if inplace else inp.clone()
         output = output / res
         # - Perform explicit rounding
-        output = output.round()
+        skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
+        if not skip_rounding:
+            output = output.round()
+        else:
+            is_testing =  os.environ.get("AIHWKIT_TESTING", False)
+            if not is_testing:
+                del os.environ["_AIHWKIT_NO_ROUNDING"]
+                assert is_testing, "_AIHWKIT_NO_ROUNDING was set but we are not in testing mode."
         # - Scale back down
         output *= res
         return output
@@ -319,7 +327,6 @@ class TorchLinear:
             else:
                 modified_slice = weights[:, current_upper : current_upper + inp_size]
 
-            print("inp_slice", inp_slice)
             out_slice = inp_slice @ modified_slice.T
 
             if training and rpu_config.forward.out_noise > 0:
@@ -330,7 +337,7 @@ class TorchLinear:
                         assumed_wmax = assumed_wmax.view(-1)
                     wmax = (
                         assumed_wmax
-                        if assumed_wmax.numel() == 1
+                        if assumed_wmax.numel() == 1 or out_slice.ndim == 1
                         else assumed_wmax.view(-1, out_slice.size(-1))
                     )
                     out_noise = (

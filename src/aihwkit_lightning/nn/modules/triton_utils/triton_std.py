@@ -99,7 +99,7 @@ def per_slice_sum_kernel(
         num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
         for k in range(0, num_k):
             current_upper = min(
-                ir_range_upper, current_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
+                ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
             offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
             a_ptrs = inp_ptr + (
@@ -110,6 +110,7 @@ def per_slice_sum_kernel(
                 mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper),
                 other=0.0,
             )
+            a = a.to(tl.float32)
             tl.atomic_add(per_slice_sum_ptr + slice_idx, tl.sum(a))
             current_lower = current_upper
         ir_range_lower = ir_range_upper
@@ -198,7 +199,7 @@ def center_and_square_kernel(
         num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
         for k in range(0, num_k):
             current_upper = min(
-                ir_range_upper, current_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
+                ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
             offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
             a_ptrs = inp_ptr + (
@@ -209,6 +210,7 @@ def center_and_square_kernel(
                 mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper),
                 other=current_mean,
             )
+            a = a.to(tl.float32)
             a_centered = a - current_mean
             centered_and_squared = tl.sum((a_centered * a_centered))
             tl.atomic_add(per_slice_centered_and_squared_ptr + slice_idx, centered_and_squared)
@@ -235,7 +237,7 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
     inp_size, hidden_size = inp.shape
     upper_end_of_slices = upper_end_of_slices.flatten().contiguous()
     num_slices = upper_end_of_slices.numel()
-    per_slice_sum = zeros((num_slices,), device=inp.device, dtype=inp.dtype)
+    per_slice_sum = zeros((num_slices,), device=inp.device, dtype=float32)
     num_inputs_per_slice = inp_size * cat(
         [upper_end_of_slices[0].view((1,)), (upper_end_of_slices[1:] - upper_end_of_slices[:-1])]
     )
@@ -255,7 +257,7 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
     )
     per_slice_mean = per_slice_sum / num_inputs_per_slice
 
-    per_slice_centered_and_squared = zeros((num_slices,), device=inp.device, dtype=inp.dtype)
+    per_slice_centered_and_squared = zeros((num_slices,), device=inp.device, dtype=float32)
     center_and_square_kernel[per_slice_grid](
         inp,
         upper_end_of_slices,
@@ -268,6 +270,7 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
         inp.stride(1),
     )
     per_slice_std = sqrt(per_slice_centered_and_squared / (num_inputs_per_slice - 1))
+    per_slice_std = per_slice_std.to(dtype=inp.dtype)
     return per_slice_std
 
 

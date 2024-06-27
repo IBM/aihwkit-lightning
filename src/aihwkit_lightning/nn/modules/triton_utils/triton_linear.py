@@ -11,6 +11,7 @@
 # that they have been altered from the originals.
 
 """Functions for fast linear in triton."""
+import os
 from typing import List
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
@@ -22,12 +23,24 @@ from aihwkit_lightning.nn.modules.triton_utils.triton_std import sliced_fast_std
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 
-# @triton.autotune(
-#     configs=[triton.Config(
-#     {"BLOCK_SIZE_HIDDEN": 32, "BLOCK_SIZE_OUT": 128},
-#     num_warps=8, num_stages=0)],
-#     key=["hidden_size", "out_size"],
-# )
+@triton.autotune(
+configs=[triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3,
+                    num_warps=8),
+    triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5,
+                    num_warps=2),
+    triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5,
+                    num_warps=2)],
+key=["hidden_size", "out_size"])
 @triton.jit
 def modifier_kernel(
     # pointers to tensors
@@ -132,12 +145,24 @@ def modifier_kernel(
         ir_range_lower = ir_range_upper
 
 
-# @triton.autotune(
-#     configs=[triton.Config(
-#     {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 32, "BLOCK_SIZE_OUT": 128, "GROUP_SIZE_INP": 1},
-#     num_warps=8, num_stages=0)],
-#     key=["inp_size", "hidden_size", "out_size"],
-# )
+@triton.autotune(
+configs=[triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64, "GROUP_SIZE_INP": 8}, num_stages=3,
+                    num_warps=8),
+    triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=4,
+                    num_warps=4),
+    triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=5,
+                    num_warps=2),
+    triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=5,
+                    num_warps=2)],
+key=["inp_size", "hidden_size", "out_size"])
 @triton.jit
 def matmul_kernel(
     # pointers to tensors
@@ -191,9 +216,9 @@ def matmul_kernel(
     num_pid_in_group = GROUP_SIZE_INP * num_pid_n  # 2 * 8 = 16
     group_id = pid // num_pid_in_group  # 0 .. 15 belong to 0 and 16 .. 31 to 1 -> 1
     first_pid_m = group_id * GROUP_SIZE_INP  # 0
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_INP)  # 2
-    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)  # 1
-    pid_n = (pid % num_pid_in_group) // group_size_m  # 0
+    GROUP_SIZE_INP = min(num_pid_m - first_pid_m, GROUP_SIZE_INP)  # 2
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % GROUP_SIZE_INP)  # 1
+    pid_n = (pid % num_pid_in_group) // GROUP_SIZE_INP  # 0
 
     accumulator = tl.zeros(
         (BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32 if is_float32 else tl.float16
@@ -206,8 +231,6 @@ def matmul_kernel(
     )
 
     # Generate the pointers
-    # offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)) % inp_size
-    # offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
     offs_am = (pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP))
     offs_bn = (pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT))
     offs_assumed_wmax = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
@@ -233,6 +256,9 @@ def matmul_kernel(
         ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
         current_lower = ir_range_lower
 
+        # load the correct input range
+        input_range = tl.load(input_range_ptr + slice_idx)
+
         num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
         for k in range(0, num_k):
             current_upper = min(
@@ -250,9 +276,6 @@ def matmul_kernel(
 
             a = tl.load(a_ptrs, mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper), other=0.0)
             b = tl.load(b_ptrs, mask=(offs_k[:, None] < current_upper) & (offs_bn[None, :] < out_size), other=0.0)
-
-            # load the correct input range
-            input_range = tl.load(input_range_ptr + slice_idx)
 
             if not ir_vector_is_none:
                 # save the correct IR per dimension in the hidden
@@ -279,8 +302,6 @@ def matmul_kernel(
 
             # do the MVM
             dot_prod = tl.dot(a, b, allow_tf32=allow_tf32)
-            if (slice_idx == 0 and k == 0) and pid == 0: tl.device_print("a", a)
-            if (slice_idx == 0 and k == 0) and pid == 0: tl.device_print("b", b)
 
             if out_noise:
                 randn_block = tl.randn(out_noise_seed + pid, output_random_offsets)
@@ -406,8 +427,8 @@ class TritonLinear(Function):
                 modifier_seed,
                 modifier_std,
                 # block sizes
-                16,
-                32,
+                # 16,  # for debugging
+                # 32,
             )
 
         # invoke kernel
@@ -435,6 +456,9 @@ class TritonLinear(Function):
         ir_vector = empty((1, hidden_size), device=inp.device, dtype=inp.dtype)
         ir_vector = ir_vector.contiguous()
 
+        # for some tests, we skip rounding
+        skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
+
         matmul_kernel[grid](
             inp,  # 2D [inp_size, hidden_size]
             weights.T,  # 2D [hidden_size, out_size]
@@ -461,25 +485,24 @@ class TritonLinear(Function):
             # for the other ptrs, we assume stride 1
             # miscellaneous
             inp_res,  # inp_res
-            inp_res == -1,  # is_fp
+            inp_res == -1 or skip_rounding,  # is_fp
             inp.dtype == float32,
-            False,  # allow_tf32 DEBUG.. Change to True in the end
+            True,
             out_noise,
             out_noise_seed,
             out_noise_std,
             out_noise_per_channel,
             False,  # ir_vector is None
             # block sizes
-            32,  # DEBUG! Autotune...
-            64,
-            16,
-            2,
+            # 16,  # This is for debugging
+            # 256,
+            # 16,
+            # 2,
         )
 
         # save some stuff for backwards
-        ctx.in_sizes = in_sizes
         ctx.rpu_config = rpu_config
-        ctx.save_for_backward(inp, weights, input_range, ir_vector, upper_end_of_slices)
+        ctx.save_for_backward(inp, weights, input_range, ir_vector)
 
         out = out.view(out_shape)
         return out
@@ -490,12 +513,9 @@ class TritonLinear(Function):
         # import pydevd
         # pydevd.settrace(suspend=False, trace_only_current_thread=True)
 
-        in_sizes: List[int]
-        in_sizes = ctx.in_sizes
-
         rpu_config: TorchInferenceRPUConfig
         rpu_config = ctx.rpu_config
-        inp, weights, input_range, ir_vector, upper_end_of_slices = ctx.saved_tensors
+        inp, weights, input_range, ir_vector = ctx.saved_tensors
 
         weights: Tensor
         grad_inp_shape = (*grad_output.shape[:-1], weights.size(1))
@@ -509,11 +529,14 @@ class TritonLinear(Function):
             inp_res = 2.0 / inp_res if inp_res > 1.0 else 2.0 * inp_res
             assert inp_res > 0, "resolution is <= 0"
 
+        # for some tests, we skip rounding
+        skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
+
         # input gradient
         inp: Tensor
         ir_vector: Tensor
         inp_rounded = inp.clamp(-ir_vector, ir_vector)
-        if inp_res > 0:
+        if inp_res > 0 and not skip_rounding:
             scale = ir_vector * inp_res
             inp_rounded = (inp_rounded / scale).round() * scale
         grad_w = grad_output.T @ inp_rounded
@@ -524,8 +547,8 @@ class TritonLinear(Function):
         decay = rpu_config.pre_post.input_range.decay  # type: ignore[attr-defined]
         input_min_percentage = rpu_config.pre_post.input_range.input_min_percentage  # type: ignore[attr-defined]
 
-        upper_thresh = (inp >= ir_vector).view_as(grad_inp)
-        lower_thresh = (inp <= -ir_vector).view_as(grad_inp)
+        upper_thresh = (inp > ir_vector).view_as(grad_inp)
+        lower_thresh = (inp < -ir_vector).view_as(grad_inp)
         ir_grad = zeros_like(input_range)
         ir_grad += clamp(grad_inp[upper_thresh], min=None, max=0.0).sum()
         ir_grad -= clamp(grad_inp[lower_thresh], min=0.0, max=None).sum()
