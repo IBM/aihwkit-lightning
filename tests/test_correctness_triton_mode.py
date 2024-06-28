@@ -31,7 +31,6 @@ from torch import (
     manual_seed,
     arange,
 )
-from torch.optim import AdamW
 from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.simulator.configs import WeightModifierType
@@ -308,21 +307,21 @@ if __name__ == "__main__":
     #     dtype=float16,
     # )
     test_linear_forward(
-        1,
-        3,
-        32,
-        32,
-        True,
-        254,
-        20,
-        True,
-        False,
-        3.0,
-        2.0,
-        True,
-        False,
-        WeightModifierType.NONE,
-        1 / 254,
-        "cuda",
-        float32,
+        bsz=1,
+        num_inp_dims=1,
+        inp_size=10,
+        out_size=10,
+        bias=True,
+        inp_res=254,
+        max_inp_size=20,
+        ir_enable=True,
+        ir_learn_input_range=True,
+        ir_init_value=3.0,
+        ir_init_std_alpha=2.0,
+        out_noise=False,
+        out_noise_per_channel=True,
+        weight_modifier=WeightModifierType.DISCRETIZE,
+        weight_modifier_res=254,
+        device="cuda",
+        dtype=float32,
     )

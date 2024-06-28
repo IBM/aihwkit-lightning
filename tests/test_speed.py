@@ -42,6 +42,18 @@ from aihwkit_lightning.simulator.configs import WeightModifierType, WeightClipTy
 from aihwkit_lightning.optim import AnalogOptimizer
 
 
+TRITON_AVAIL = False
+try:
+    import triton
+    from aihwkit_lightning.nn.modules.linear import is_at_least_volta_gpu
+
+    if not is_at_least_volta_gpu():
+        raise ImportError("GPU must at least be Volta")
+    TRITON_AVAIL = True
+except ImportError:
+    print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
+
+
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 
 
@@ -122,6 +134,7 @@ def gen_rpu(ir_enable: bool, weight_noise_enable: bool, clip_enable: bool):
     def rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
         rpu_config.mapping.max_input_size = -1
         rpu_config.forward.inp_res = 254 if ir_enable else -1
+        rpu_config.forward.out_noise = 0.0
         rpu_config.pre_post.input_range.enable = ir_enable
         rpu_config.pre_post.input_range.learn_input_range = True
         rpu_config.clip.sigma = 2.0
@@ -307,5 +320,65 @@ def benchmark_aihwkit_lightning():
     redirect_print("=====================================================")
 
 
+def benchmark_triton_implementation():
+    assert TRITON_AVAIL, "Triton is not available"
+
+    def bench(layer: AnalogLinear, inp: Tensor, use_triton: bool):
+        """Pass the inputs through the layer"""
+        if use_triton:
+            os.environ["AIHWKIT_USE_TRITON"] = "1"
+        layer(inp)
+        if use_triton:
+            del os.environ["AIHWKIT_USE_TRITON"]
+
+    @triton.testing.perf_report(
+        triton.testing.Benchmark(
+            x_names=["n_cols", "n_rows"],
+            x_vals=[128 * i for i in range(8, 40, 4)],
+            line_arg="provider",
+            line_vals=["torch", "triton"],
+            line_names=["PyTorch", "Triton"],
+            styles=[("green", "-"), ("blue", "-")],
+            ylabel="Time [ms]",
+            plot_name="linear performance fwd",
+            args={},
+        )
+    )
+    def benchmark(n_cols: int, n_rows: int, provider: str):
+        """
+        Benchmark the linear layer.
+
+        Args:
+            n_cols (int): Number of columns
+            n_rows (int): Number of rows
+            provider (int): torch or triton
+
+        Returns:
+            Tuple[float]: Median, min, max of the runtimes in ms
+        """
+        quantiles = [0.5, 0.2, 0.8]
+        bsz = 128
+        dtype = float16
+        device = torch_device("cuda" if torch_cuda.is_available() else "cpu")
+        assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
+        rpu_config, _ = gen_rpu(ir_enable=True, weight_noise_enable=False, clip_enable=False)
+
+        print(f"{provider}: Linear layer shape {n_rows} x {n_cols}")
+
+        layer = AnalogLinear(
+            in_features=n_rows, out_features=n_cols, bias=False, rpu_config=rpu_config
+        )
+        layer = layer.to(device=device, dtype=dtype)
+        inp = randn(bsz, n_rows, device=device, dtype=dtype)
+        time_ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: bench(layer, inp, use_triton=provider == "triton"), quantiles=quantiles
+        )
+        print(time_ms)
+        return time_ms, max_ms, min_ms
+
+    benchmark.run(print_data=True, save_path="debug/linear_performance_fwd_torch_vs_triton")
+
+
 if __name__ == "__main__":
+    benchmark_triton_implementation()
     benchmark_aihwkit_lightning()

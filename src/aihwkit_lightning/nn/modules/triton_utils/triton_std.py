@@ -17,57 +17,26 @@ import triton.language as tl  # type: ignore
 from torch import zeros, Tensor, float32, tensor, cat, sqrt
 
 
+# fmt: off
 @triton.autotune(
     # pylint: disable=line-too-long
     configs=[
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=1
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=1),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
     ],
     key=["inp_size", "hidden_size"],
     reset_to_zero=["per_slice_sum_ptr"],
@@ -119,54 +88,22 @@ def per_slice_sum_kernel(
 @triton.autotune(
     # pylint: disable=line-too-long
     configs=[
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=1
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
-        triton.Config(
-            {"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8
-        ),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=1),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 128}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 256, "BLOCK_SIZE_HIDDEN": 256}, num_stages=3, num_warps=8),  # noqa: E501
     ],
     key=["inp_size", "hidden_size"],
     reset_to_zero=["per_slice_centered_and_squared_ptr"],
@@ -216,6 +153,7 @@ def center_and_square_kernel(
             tl.atomic_add(per_slice_centered_and_squared_ptr + slice_idx, centered_and_squared)
             current_lower = current_upper
         ir_range_lower = ir_range_upper
+# fmt: on
 
 
 def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
@@ -233,6 +171,10 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
     Returns:
         stds: Tensor of shape [num_slices]
     """
+    # shortcut if not sliced
+    if upper_end_of_slices.numel() == 1:
+        return inp.std().view(1, 1)
+
     inp = inp.flatten(end_dim=-2)
     inp_size, hidden_size = inp.shape
     upper_end_of_slices = upper_end_of_slices.flatten().contiguous()
@@ -277,7 +219,10 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
 if __name__ == "__main__":
     from torch import randn, float32, float16, allclose, manual_seed, compile, empty
 
-    def naive_per_slice_std(inp: Tensor, upper_end_of_slices: Tensor):
+    def naive_per_slice_std(inp: Tensor, upper_end_of_slices: Tensor, shortcut: bool):
+        if shortcut:
+            return inp.std().view(1, 1)
+
         lower = 0
         stds = empty((upper_end_of_slices.numel(),), device=inp.device)
         for idx, upper in enumerate(upper_end_of_slices):
@@ -297,7 +242,7 @@ if __name__ == "__main__":
     )
 
     per_slice_stds = sliced_fast_std(rand_inp, upper_end_of_slices)
-    stds = naive_per_slice_std(rand_inp, upper_end_of_slices)
+    stds = naive_per_slice_std(rand_inp, upper_end_of_slices, upper_end_of_slices.numel() == 1)
 
     assert allclose(stds, per_slice_stds, atol=1e-5)
 
@@ -306,9 +251,9 @@ if __name__ == "__main__":
             x_names=["hidden_size"],
             x_vals=[128 * i for i in range(8, 40, 4)],
             line_arg="provider",
-            line_vals=["torch", "torch-compiled", "triton"],
-            line_names=["PyTorch", "PyTorch (compile)", "Triton"],
-            styles=[("green", "-"), ("green", "--"), ("blue", "-")],
+            line_vals=["torch", "triton"],
+            line_names=["PyTorch", "Triton"],
+            styles=[("green", "-"), ("blue", "-")],
             ylabel="Time [ms]",
             plot_name="sliced-std performance",
             args={},
@@ -331,24 +276,22 @@ if __name__ == "__main__":
         inp = randn((inp_size, hidden_size), device="cuda", dtype=float16)
         interval = hidden_size // 4
         split_sizes = [interval for _ in range(3)] + [hidden_size - int(3 * interval)]
+        split_sizes = [hidden_size]
         upper_end_of_slices = (
             tensor(split_sizes, device=rand_inp.device, dtype=rand_inp.dtype)
             .cumsum(dim=0)
             .contiguous()
             .int()
         )
-        compiled_naive_per_slice_std = compile(naive_per_slice_std)
 
         quantiles = [0.5, 0.2, 0.8]
 
         if provider == "torch":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: naive_per_slice_std(inp, upper_end_of_slices), quantiles=quantiles
-            )
-        if provider == "torch-compiled":
-            compiled_naive_per_slice_std(inp, upper_end_of_slices)
-            time_ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: compiled_naive_per_slice_std(inp, upper_end_of_slices), quantiles=quantiles
+                lambda: naive_per_slice_std(
+                    inp, upper_end_of_slices, upper_end_of_slices.numel() == 1
+                ),
+                quantiles=quantiles,
             )
         if provider == "triton":
             time_ms, min_ms, max_ms = triton.testing.do_bench(

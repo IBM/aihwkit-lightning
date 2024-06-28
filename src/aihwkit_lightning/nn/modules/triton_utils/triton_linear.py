@@ -23,6 +23,7 @@ from aihwkit_lightning.nn.modules.triton_utils.triton_std import sliced_fast_std
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 
+# fmt: off
 @triton.autotune(
     configs=[
         triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),
@@ -73,7 +74,6 @@ def modifier_kernel(
 
     ir_range_lower = 0
     for slice_idx in range(0, num_slices):
-
         # load the abs-max we need
         abs_max_slice_ptrs = (
             assumed_wmax_ptr
@@ -89,7 +89,6 @@ def modifier_kernel(
                 abs_max_slice_ptrs, mask=offs_assumed_wmax < out_size, other=float("-inf")
             )
             assumed_wmax_per_slice = assumed_wmax_per_slice[None, :]
-
         ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
         current_lower = ir_range_lower
 
@@ -98,14 +97,11 @@ def modifier_kernel(
             current_upper = min(
                 ir_range_upper, current_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
-
             offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
-
             b_ptrs = weights_ptr + (
                 offs_k[:, None] * stride_weights_hidden_size
                 + offs_bn[None, :] * stride_weights_out_size
             )
-
             b = tl.load(b_ptrs, mask=offs_k[:, None] < current_upper, other=0.0)
 
             if (modifier_type == "Discretize" or modifier_type == "DiscretizeAddNormal") or (
@@ -134,94 +130,20 @@ def modifier_kernel(
                 b,
                 mask=(offs_k[:, None] < current_upper) & (offs_assumed_wmax[None, :] < out_size),
             )
-
             current_lower = current_upper
-
         ir_range_lower = ir_range_upper
 
 
 @triton.autotune(
     configs=[
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 128,
-                "BLOCK_SIZE_OUT": 256,
-                "BLOCK_SIZE_HIDDEN": 64,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=3,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 64,
-                "BLOCK_SIZE_OUT": 256,
-                "BLOCK_SIZE_HIDDEN": 32,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 128,
-                "BLOCK_SIZE_OUT": 128,
-                "BLOCK_SIZE_HIDDEN": 32,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 128,
-                "BLOCK_SIZE_OUT": 64,
-                "BLOCK_SIZE_HIDDEN": 32,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 64,
-                "BLOCK_SIZE_OUT": 128,
-                "BLOCK_SIZE_HIDDEN": 32,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 128,
-                "BLOCK_SIZE_OUT": 32,
-                "BLOCK_SIZE_HIDDEN": 32,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=4,
-            num_warps=4,
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 64,
-                "BLOCK_SIZE_OUT": 32,
-                "BLOCK_SIZE_HIDDEN": 32,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=5,
-            num_warps=2,
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_INP": 32,
-                "BLOCK_SIZE_OUT": 64,
-                "BLOCK_SIZE_HIDDEN": 32,
-                "GROUP_SIZE_INP": 8,
-            },
-            num_stages=5,
-            num_warps=2,
-        ),
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 256,"BLOCK_SIZE_HIDDEN": 64,"GROUP_SIZE_INP": 8}, num_stages=3, num_warps=8),
+        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 256,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 128,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 64,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
+        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 128,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 32,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
+        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 32,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=5 ,num_warps=2),
+        triton.Config({"BLOCK_SIZE_INP": 32,"BLOCK_SIZE_OUT": 64,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=5 ,num_warps=2),
     ],
     key=["inp_size", "hidden_size", "out_size"],
 )
@@ -251,15 +173,14 @@ def matmul_kernel(
     stride_assumed_wmax_num_slices,
     stride_assumed_wmax_out_size,
     # miscellaneous
+    out_noise_seed,
     inp_res: tl.constexpr,
     is_fp: tl.constexpr,
-    is_float32: tl.constexpr,
-    allow_tf32: tl.constexpr,
     out_noise: tl.constexpr,
-    out_noise_seed: tl.constexpr,
     out_noise_std: tl.constexpr,
     out_noise_per_channel: tl.constexpr,
     ir_vector_is_none: tl.constexpr,
+    dtype: tl.constexpr,
     # block sizes
     BLOCK_SIZE_INP: tl.constexpr,
     BLOCK_SIZE_HIDDEN: tl.constexpr,
@@ -282,9 +203,7 @@ def matmul_kernel(
     pid_m = first_pid_m + ((pid % num_pid_in_group) % GROUP_SIZE_INP)  # 1
     pid_n = (pid % num_pid_in_group) // GROUP_SIZE_INP  # 0
 
-    accumulator = tl.zeros(
-        (BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32 if is_float32 else tl.float16
-    )
+    accumulator = tl.zeros((BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32)
 
     # for random number generation of output
     increase_out_offsets_by = BLOCK_SIZE_INP * BLOCK_SIZE_OUT
@@ -347,6 +266,8 @@ def matmul_kernel(
                 other=0.0,
             )
 
+            input_range = input_range.to(dtype)
+
             if not ir_vector_is_none:
                 # save the correct IR per dimension in the hidden
                 tl.store(ir_vector_ptr + offs_k, input_range, mask=offs_k < current_upper)
@@ -359,19 +280,18 @@ def matmul_kernel(
             a = tl.where(under_ir_mask, -input_range, a)
 
             # scale with input ranges
-            a = a / input_range
+            a = a / input_range  # -> float32
 
             if not is_fp:
                 a = a / inp_res
                 a = tl.extra.cuda.libdevice.rint(a)
+                # here a is float32
                 a = a * inp_res
-
-            if not is_float32:
-                a = a.to(tl.float16)
-                b = b.to(tl.float16)
+            
+            a = a.to(dtype)
 
             # do the MVM
-            dot_prod = tl.dot(a, b, allow_tf32=allow_tf32)
+            dot_prod = tl.dot(a, b)
 
             if out_noise:
                 randn_block = tl.randn(out_noise_seed + pid, output_random_offsets)
@@ -388,20 +308,13 @@ def matmul_kernel(
                 output_random_offsets += increase_out_offsets_by
 
             # scale back with the input range
-            dot_prod = input_range * dot_prod
-
-            # accumulate
-            if not is_float32:
-                dot_prod = dot_prod.to(tl.float16)
+            dot_prod = input_range.to(tl.float32) * dot_prod
             accumulator = accumulator + dot_prod
 
             current_lower = current_upper
-
         ir_range_lower = ir_range_upper
 
-    c = accumulator
-    if not is_float32:
-        c = c.to(tl.float16)
+    c = accumulator.to(dtype)
 
     offs_cm = pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)
     offs_cn = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
@@ -410,6 +323,7 @@ def matmul_kernel(
     )
     c_mask = (offs_cm[:, None] < inp_size) & (offs_cn[None, :] < out_size)
     tl.store(c_ptrs, c, mask=c_mask)
+# fmt: on
 
 
 class TritonLinear(Function):
@@ -528,6 +442,9 @@ class TritonLinear(Function):
 
         # for some tests, we skip rounding
         skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
+        skip_rounding = True if skip_rounding == "1" else False
+
+        dtype = tl.float32 if inp.dtype == float32 else tl.float16
 
         matmul_kernel[grid](
             inp,  # 2D [inp_size, hidden_size]
@@ -554,15 +471,14 @@ class TritonLinear(Function):
             assumed_wmax.stride(1),
             # for the other ptrs, we assume stride 1
             # miscellaneous
+            out_noise_seed,
             inp_res,  # inp_res
             inp_res == -1 or skip_rounding,  # is_fp
-            inp.dtype == float32,
-            True,
             out_noise,
-            out_noise_seed,
             out_noise_std,
             out_noise_per_channel,
             False,  # ir_vector is None
+            dtype,
             # block sizes
             # 16,  # This is for debugging
             # 256,
