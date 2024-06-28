@@ -275,7 +275,9 @@ def sliced_fast_abs_max(weights: Tensor, split_sizes: list[int]):
             and the per-channel abs max.
     """
     if len(split_sizes) == 1:
-        return fast_abs_max(weights)
+        per_channel_amax = fast_abs_max(weights)
+        per_channel_amax = per_channel_amax.view(1, -1)
+        return per_channel_amax
 
     assert weights.ndim == 2, "weight matrix shape must have 2 dimensions"
     assert weights.is_contiguous(), "weight matrix must be contiguous"

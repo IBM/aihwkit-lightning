@@ -379,7 +379,7 @@ def matmul_kernel(
                 randn_block = (
                     assumed_wmax_per_slice
                     * out_noise_std
-                    / tl.sqrt(num_slices.to(tl.float32) * num_k.to(tl.float32))
+                    / tl.sqrt(num_slices * num_k.to(tl.float32))
                     * randn_block
                 )
                 # add the noise

@@ -13,6 +13,7 @@
 """Module class for analog linear layer."""
 from typing import Optional, Tuple, List
 import os
+from logging import warning
 from torch import Tensor, cuda, empty, zeros
 from torch.nn import Linear, Parameter
 from aihwkit_lightning.simulator.configs import (
@@ -106,7 +107,10 @@ class AnalogLinear(Linear, AnalogLayerBase):
             modified_weights = self.weight.clone()
 
         triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
-        if TRITON_AVAIL and len(self.in_sizes) > 1 and triton_enabled:
+        if triton_enabled and not TRITON_AVAIL:
+            warning("AIHWKIT_USE_TRITON is set, but triton is not installed")
+        # if TRITON_AVAIL and len(self.in_sizes) > 1 and triton_enabled:
+        if TRITON_AVAIL and triton_enabled:
             out = TritonLinear.apply(
                 inp,
                 modified_weights,
