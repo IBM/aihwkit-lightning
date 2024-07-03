@@ -109,7 +109,6 @@ class AnalogLinear(Linear, AnalogLayerBase):
         triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
         if triton_enabled and not TRITON_AVAIL:
             warning("AIHWKIT_USE_TRITON is set, but triton is not installed")
-        # if TRITON_AVAIL and len(self.in_sizes) > 1 and triton_enabled:
         if TRITON_AVAIL and triton_enabled:
             out = TritonLinear.apply(
                 inp,

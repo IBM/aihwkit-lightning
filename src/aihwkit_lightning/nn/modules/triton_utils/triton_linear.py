@@ -56,7 +56,7 @@ def modifier_kernel(
     # miscellaneous
     modifier_type: tl.constexpr,  # str
     modifier_weight_res: tl.constexpr,  # float
-    modifier_seed: tl.constexpr,  # int
+    modifier_seed,  # int
     modifier_std: tl.constexpr,  # float
     # block sizes
     BLOCK_SIZE_HIDDEN: tl.constexpr,
@@ -95,7 +95,7 @@ def modifier_kernel(
         num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
         for k in range(0, num_k):
             current_upper = min(
-                ir_range_upper, current_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
+                ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
             offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
             b_ptrs = weights_ptr + (
@@ -411,7 +411,7 @@ class TritonLinear(Function):
                 modifier_seed,
                 modifier_std,
                 # block sizes
-                # 16,  # for debugging
+                # 32,  # for debugging
                 # 32,
             )
 
@@ -480,10 +480,10 @@ class TritonLinear(Function):
             False,  # ir_vector is None
             dtype,
             # block sizes
-            # 16,  # This is for debugging
-            # 256,
-            # 16,
-            # 2,
+            # 64,  # This is for debugging
+            # 32,
+            # 128,
+            # 8,
         )
 
         # save some stuff for backwards
