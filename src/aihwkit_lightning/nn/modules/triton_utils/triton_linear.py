@@ -12,12 +12,11 @@
 
 """Functions for fast linear in triton."""
 import os
-from typing import List
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
 from torch.autograd import Function
 from torch.autograd.function import FunctionCtx
-from torch import Tensor, empty, tensor, float32, randint, zeros_like, clamp
+from torch import Tensor, empty, float32, randint, zeros_like, clamp
 from aihwkit_lightning.nn.modules.triton_utils.triton_abs_max import sliced_fast_abs_max
 from aihwkit_lightning.nn.modules.triton_utils.triton_std import sliced_fast_std
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
@@ -378,15 +377,23 @@ class TritonLinear(Function):
         # update the input ranges if necessary
         if training:
             ir_params = rpu_config.pre_post.input_range
-            if (input_range_update_idx < ir_params.init_from_data).any():
+            if input_range_update_idx[0] < ir_params.init_from_data:
+                # # Avoiding the for loop yields a speed-up.
                 stds = sliced_fast_std(inp, upper_end_of_slices)
+                # if (stds > 0.0).all():
+                #     # stds = naive_per_slice_std(inp, upper_end_of_slices)
+                #     input_range.data = (
+                #                 input_range * input_range_update_idx
+                #                 + ir_params.init_std_alpha * stds
+                #             ) / (input_range_update_idx + 1)
+                #     input_range_update_idx += 1
                 for slice_idx in range(num_slices):
                     idx = input_range_update_idx[slice_idx]
                     if idx < ir_params.init_from_data:
-                        if stds[slice_idx] > 0.0:
+                        std = stds[slice_idx]
+                        if std > 0.0:
                             input_range.data[slice_idx] = (
-                                input_range.data[slice_idx] * idx
-                                + ir_params.init_std_alpha * stds[slice_idx]
+                                input_range.data[slice_idx] * idx + ir_params.init_std_alpha * std
                             ) / (idx + 1)
                             input_range_update_idx[slice_idx] += 1
                         input_range.data[slice_idx] = input_range.data[slice_idx].abs()

@@ -14,7 +14,7 @@
 
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
-from torch import zeros, Tensor, float32, tensor, cat, sqrt
+from torch import zeros, Tensor, float32, tensor, cat, sqrt, empty
 
 
 # fmt: off
@@ -235,19 +235,34 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
     return per_slice_std
 
 
+def naive_per_slice_std(inp: Tensor, upper_end_of_slices: Tensor):
+    """
+    Given inputs of shape [..., hidden_size] and upper_end_of_slices Tensor
+    that has the upper index of each slice of the inputs,
+    computes the per-slice std of the inputs.
+    For example, upper_end_of_slices can be [16, 32].
+    Then the stds would be calculated for ranges inps[..., :16],
+    inps[..., 16:32].
+
+    Args:
+        inps: Tensor of shape [..., hidden_size]
+        upper_end_of_slices: Tensor of shape [num_slices]
+    Returns:
+        stds: Tensor of shape [num_slices]
+    """
+    # shortcut if not sliced
+    if upper_end_of_slices.numel() == 1:
+        return inp.std().view(1, 1)
+    lower = 0
+    stds = empty((upper_end_of_slices.numel(),), device=inp.device, dtype=inp.dtype)
+    for idx, upper in enumerate(upper_end_of_slices):
+        stds[idx] = inp[:, lower:upper].std()
+        lower = upper
+    return stds
+
+
 if __name__ == "__main__":
-    from torch import randn, float32, float16, allclose, manual_seed, compile, empty
-
-    def naive_per_slice_std(inp: Tensor, upper_end_of_slices: Tensor, shortcut: bool):
-        if shortcut:
-            return inp.std().view(1, 1)
-
-        lower = 0
-        stds = empty((upper_end_of_slices.numel(),), device=inp.device)
-        for idx, upper in enumerate(upper_end_of_slices):
-            stds[idx] = inp[:, lower:upper].std()
-            lower = upper
-        return stds
+    from torch import randn, float32, float16, allclose, manual_seed
 
     manual_seed(0)
 
@@ -261,7 +276,7 @@ if __name__ == "__main__":
     )
 
     per_slice_stds = sliced_fast_std(rand_inp, upper_end_of_slices)
-    stds = naive_per_slice_std(rand_inp, upper_end_of_slices, upper_end_of_slices.numel() == 1)
+    stds = naive_per_slice_std(rand_inp, upper_end_of_slices)
 
     assert allclose(stds, per_slice_stds, atol=1e-5)
 
@@ -306,10 +321,7 @@ if __name__ == "__main__":
 
         if provider == "torch":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: naive_per_slice_std(
-                    inp, upper_end_of_slices, upper_end_of_slices.numel() == 1
-                ),
-                quantiles=quantiles,
+                lambda: naive_per_slice_std(inp, upper_end_of_slices), quantiles=quantiles
             )
         if provider == "triton":
             time_ms, min_ms, max_ms = triton.testing.do_bench(

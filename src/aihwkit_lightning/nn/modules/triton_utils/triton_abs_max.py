@@ -287,10 +287,7 @@ def sliced_fast_abs_max(weights: Tensor, upper_end_of_slices: Tensor):
 
     # allocate output tensors
     per_channel_amax = full(
-        size=(n_splits, n_cols),
-        fill_value=float("-inf"),
-        dtype=float32,
-        device=weights.device,
+        size=(n_splits, n_cols), fill_value=float("-inf"), dtype=float32, device=weights.device
     )
 
     # invoke kernel
@@ -373,7 +370,9 @@ if __name__ == "__main__":
         weights = randn((n_cols, n_rows), device="cuda", dtype=float16)
         split_sizes = get_split_size(n_rows, max_size=128)
         upper_end_of_slices = (
-            tensor(split_sizes, device=weights.device, dtype=weights.dtype).cumsum(dim=0, dtype=int32).contiguous()
+            tensor(split_sizes, device=weights.device, dtype=weights.dtype)
+            .cumsum(dim=0, dtype=int32)
+            .contiguous()
         )
 
         quantiles = [0.5, 0.2, 0.8]
@@ -396,7 +395,9 @@ if __name__ == "__main__":
             print(f"n_cols: {n_cols_}, n_rows: {n_rows_}")
             weights_ = randn((n_cols_, n_rows_), device="cuda", dtype=float32)
             upper_end_of_slices_ = (
-                tensor(split_sizes_, device=weights_.device, dtype=weights_.dtype).cumsum(dim=0, dtype=int32).contiguous()
+                tensor(split_sizes_, device=weights_.device, dtype=weights_.dtype)
+                .cumsum(dim=0, dtype=int32)
+                .contiguous()
             )
             amax_ = weights_.abs().amax(dim=1)
             amax_ = bench(weights_, upper_end_of_slices_)

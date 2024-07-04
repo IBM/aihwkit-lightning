@@ -361,19 +361,24 @@ def benchmark_triton_implementation():
         dtype = float16
         device = torch_device("cuda" if torch_cuda.is_available() else "cpu")
         assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
-        rpu_config, _ = gen_rpu(ir_enable=True, weight_noise_enable=True, clip_enable=False, out_noise_enable=False)
+        rpu_config, _ = gen_rpu(
+            ir_enable=True, weight_noise_enable=True, clip_enable=False, out_noise_enable=False
+        )
         rpu_config.mapping.max_input_size = 512
 
-        print(f"{provider}: Linear layer shape {n_rows} x {n_cols}")
-
         layer = AnalogLinear(
-            in_features=n_rows, out_features=n_cols, bias=False, rpu_config=rpu_config, device=device, dtype=dtype
+            in_features=n_rows,
+            out_features=n_cols,
+            bias=False,
+            rpu_config=rpu_config,
+            device=device,
+            dtype=dtype,
         )
         inp = randn(bsz, n_rows, device=device, dtype=dtype)
         time_ms, min_ms, max_ms = triton.testing.do_bench(
             lambda: bench(layer, inp, use_triton=provider == "triton"), quantiles=quantiles
         )
-        print(time_ms)
+        print(f"{provider}: Linear layer shape {n_rows} x {n_cols} time {time_ms}")
         return time_ms, max_ms, min_ms
 
     benchmark.run(print_data=True, save_path="debug/linear_performance_fwd_torch_vs_triton")
@@ -381,4 +386,4 @@ def benchmark_triton_implementation():
 
 if __name__ == "__main__":
     benchmark_triton_implementation()
-    # benchmark_aihwkit_lightning()
+    benchmark_aihwkit_lightning()

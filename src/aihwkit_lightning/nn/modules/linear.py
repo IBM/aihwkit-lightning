@@ -65,7 +65,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
         max_input_size = rpu_config.mapping.max_input_size
         self.in_sizes = self.get_split_sizes(in_features, max_input_size)
         self.upper_end_of_slices = (
-            tensor(self.in_sizes, device=device, dtype=dtype).cumsum(dim=0, dtype=int32).contiguous()
+            tensor(self.in_sizes, device=device, dtype=dtype)
+            .cumsum(dim=0, dtype=int32)
+            .contiguous()
         )
 
         if rpu_config.pre_post.input_range.enable:
