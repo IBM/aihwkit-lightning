@@ -234,11 +234,26 @@ def matmul_kernel(
         else:
             assumed_wmax_per_slice = tl.load(reduced_assumed_wmax_ptr + slice_idx)
 
-        ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
+        # this gives a speedup for large input dimension
+        if num_slices == 1:
+            ir_range_upper = hidden_size
+        else:
+            ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
+
         current_lower = ir_range_lower
 
         # load the correct input range
         input_range = tl.load(input_range_ptr + slice_idx)
+
+        # DEBUG DEBUG
+        offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
+        a_ptrs = inp_ptr + (
+            offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
+        )
+        b_ptrs = weights_ptr + (
+            offs_k[:, None] * stride_weights_hidden_size
+            + offs_bn[None, :] * stride_weights_out_size
+        )
 
         num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
         for k in range(0, num_k):
@@ -246,14 +261,14 @@ def matmul_kernel(
                 ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
 
-            offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
-            a_ptrs = inp_ptr + (
-                offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
-            )
-            b_ptrs = weights_ptr + (
-                offs_k[:, None] * stride_weights_hidden_size
-                + offs_bn[None, :] * stride_weights_out_size
-            )
+            # offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
+            # a_ptrs = inp_ptr + (
+            #     offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
+            # )
+            # b_ptrs = weights_ptr + (
+            #     offs_k[:, None] * stride_weights_hidden_size
+            #     + offs_bn[None, :] * stride_weights_out_size
+            # )
 
             a = tl.load(
                 a_ptrs,
@@ -311,6 +326,11 @@ def matmul_kernel(
             dot_prod = input_range.to(tl.float32) * dot_prod
             accumulator = accumulator + dot_prod
 
+            # increment the pointers
+            offs_k += current_upper - current_lower
+            a_ptrs += (current_upper - current_lower) * stride_inp_hidden_size
+            b_ptrs += (current_upper - current_lower) * stride_weights_hidden_size
+
             current_lower = current_upper
         ir_range_lower = ir_range_upper
 
@@ -334,7 +354,7 @@ class TritonLinear(Function):
         weights: Tensor,
         input_range: Tensor,
         input_range_update_idx: Tensor,
-        in_sizes: List[int],
+        upper_end_of_slices: Tensor,
         rpu_config: TorchInferenceRPUConfig,
         training: bool,
         apply_weight_modifier: bool,
@@ -343,15 +363,11 @@ class TritonLinear(Function):
         assert weights.is_contiguous(), "weights not contiguous"
         assert inp.is_contiguous(), "inp not contiguous"
 
-        assumed_wmax = sliced_fast_abs_max(weights=weights, split_sizes=in_sizes)
+        assumed_wmax = sliced_fast_abs_max(weights=weights, upper_end_of_slices=upper_end_of_slices)
         assert assumed_wmax.is_contiguous(), "assumed_wmax not contiguous"
 
         reduced_assumed_wmax = assumed_wmax.amax(dim=1, keepdim=True)
         assert reduced_assumed_wmax.is_contiguous(), "reduced_assumed_wmax is not contiguous"
-
-        upper_end_of_slices = (
-            tensor(in_sizes, device=inp.device, dtype=inp.dtype).cumsum(dim=0).contiguous().int()
-        )
 
         out_shape = (*inp.shape[:-1], weights.size(0))
         if inp.ndim == 1:

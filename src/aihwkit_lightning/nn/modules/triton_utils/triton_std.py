@@ -65,14 +65,19 @@ def per_slice_sum_kernel(
         ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
         current_lower = ir_range_lower
 
-        num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
+        if num_slices == 1:
+            num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
+        else:
+            num_k = tl.cdiv(hidden_size, BLOCK_SIZE_HIDDEN)
+
+        offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
+        a_ptrs = inp_ptr + (
+            offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
+        )
+
         for k in range(0, num_k):
             current_upper = min(
                 ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
-            )
-            offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
-            a_ptrs = inp_ptr + (
-                offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
             )
             a = tl.load(
                 a_ptrs,
@@ -81,6 +86,11 @@ def per_slice_sum_kernel(
             )
             a = a.to(tl.float32)
             tl.atomic_add(per_slice_sum_ptr + slice_idx, tl.sum(a))
+
+            # increment pointer
+            offs_k += current_upper - current_lower
+            a_ptrs += (current_upper - current_lower) * stride_inp_hidden_size
+
             current_lower = current_upper
         ir_range_lower = ir_range_upper
 
@@ -133,15 +143,19 @@ def center_and_square_kernel(
         current_mean = tl.load(per_slice_mean_ptr + slice_idx)
         ir_range_upper = tl.load(upper_end_of_slices_ptr + slice_idx)
         current_lower = ir_range_lower
-        num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
+        if num_slices == 1:
+            num_k = tl.cdiv(ir_range_upper - ir_range_lower, BLOCK_SIZE_HIDDEN)
+        else:
+            num_k = tl.cdiv(hidden_size, BLOCK_SIZE_HIDDEN)
+        offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
+        a_ptrs = inp_ptr + (
+            offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
+        )
         for k in range(0, num_k):
             current_upper = min(
                 ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
-            offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
-            a_ptrs = inp_ptr + (
-                offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
-            )
+            
             a = tl.load(
                 a_ptrs,
                 mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper),
@@ -151,6 +165,11 @@ def center_and_square_kernel(
             a_centered = a - current_mean
             centered_and_squared = tl.sum((a_centered * a_centered))
             tl.atomic_add(per_slice_centered_and_squared_ptr + slice_idx, centered_and_squared)
+            
+            # increment pointer
+            offs_k += current_upper - current_lower
+            a_ptrs += (current_upper - current_lower) * stride_inp_hidden_size
+
             current_lower = current_upper
         ir_range_lower = ir_range_upper
 # fmt: on
@@ -276,7 +295,6 @@ if __name__ == "__main__":
         inp = randn((inp_size, hidden_size), device="cuda", dtype=float16)
         interval = hidden_size // 4
         split_sizes = [interval for _ in range(3)] + [hidden_size - int(3 * interval)]
-        split_sizes = [hidden_size]
         upper_end_of_slices = (
             tensor(split_sizes, device=rand_inp.device, dtype=rand_inp.dtype)
             .cumsum(dim=0)
