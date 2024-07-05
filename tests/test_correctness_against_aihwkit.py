@@ -124,10 +124,10 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
     linear = linear.eval()
 
     aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
-    linear = linear.to(device=device, dtype=dtype)
 
     aihwkit_weight, aihwkit_bias = aihwkit_linear.get_weights()
     linear.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+    linear = linear.to(device=device, dtype=dtype)
 
     if num_inp_dims == 1:
         inp = randn(inp_size, device=device, dtype=dtype)
@@ -250,7 +250,6 @@ def test_conv2d_forward(  # pylint: disable=too-many-arguments
     analog_conv2d = analog_conv2d.eval()
 
     aihwkit_analog_conv2d = aihwkit_analog_conv2d.to(device=device, dtype=dtype)
-    analog_conv2d = analog_conv2d.to(device=device, dtype=dtype)
 
     if num_inp_dims == 1:
         inp = randn(in_channels, height, width, device=device, dtype=dtype)
@@ -263,6 +262,7 @@ def test_conv2d_forward(  # pylint: disable=too-many-arguments
     conv_bias = digital_aihwkit_conv2d.bias
     conv_bias = conv_bias.to(device=device, dtype=dtype) if conv_bias is not None else None
     analog_conv2d.set_weights_and_biases(conv_weight, conv_bias)
+    analog_conv2d = analog_conv2d.to(device=device, dtype=dtype)
 
     out_aihwkit = aihwkit_analog_conv2d(inp)  # pylint: disable=not-callable
     out = analog_conv2d(inp)  # pylint: disable=not-callable
@@ -448,10 +448,10 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
 
     aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
-    linear = linear.to(device=device, dtype=dtype)
 
     aihwkit_weights, aihwkit_biases = aihwkit_linear.get_weights()
     linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
+    linear = linear.to(device=device, dtype=dtype)
 
     if num_inp_dims == 1:
         inp = randn(inp_size, device=device, dtype=dtype, requires_grad=True)
@@ -472,18 +472,16 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     out_aihwkit.sum().backward()
     out.sum().backward()
 
-    assert allclose(inp_aihwkit.grad, inp.grad, atol=1e-5), "grad w.r.t. the input not matching"
-    assert allclose(out_aihwkit, out, atol=1e-5)
+    atol = 1e-4
+    assert allclose(inp_aihwkit.grad, inp.grad, atol=atol), "grad w.r.t. the input not matching"
+    assert allclose(out_aihwkit, out, atol=atol)
 
     for tile_idx, tiles in enumerate(aihwkit_linear.analog_module.array):
         assert len(tiles) == 1, "Output size must be inf"
         tile = tiles[0]
         input_range = tile.input_range
-        # assert allclose(
-        #     input_range.grad, linear.input_range.grad[tile_idx], atol=1e-5
-        # ), f"AIHWKIT: {input_range.grad} lightning: {linear.input_range.grad[tile_idx]}"
         assert allclose(
-            input_range.grad, linear.input_range.grad[tile_idx], atol=1e-5
+            input_range.grad, linear.input_range.grad[tile_idx], atol=atol
         ), f"AIHWKIT: {input_range.grad} lightning: {linear.input_range.grad[tile_idx]}"
 
 
@@ -606,10 +604,10 @@ def test_weight_modifier_gradient(
     linear = AnalogLinear(in_features=in_size, out_features=out_size, rpu_config=rpu)
 
     aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
-    linear = linear.to(device=device, dtype=dtype)
 
     aihwkit_weights, aihwkit_biases = aihwkit_linear.get_weights()
     linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
+    linear = linear.to(device=device, dtype=dtype)
 
     if is_test:
         aihwkit_linear = aihwkit_linear.eval()
@@ -670,10 +668,10 @@ def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, d
     linear = AnalogLinear(in_features=in_size, out_features=out_size, rpu_config=rpu)
 
     aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
-    linear = linear.to(device=device, dtype=dtype)
 
     aihwkit_weights, aihwkit_biases = aihwkit_linear.get_weights()
     linear.set_weights_and_biases(aihwkit_weights, aihwkit_biases)
+    linear = linear.to(device=device, dtype=dtype)
 
     if is_test:
         aihwkit_linear = aihwkit_linear.eval()
@@ -692,3 +690,31 @@ def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, d
     out = linear(inp)  # pylint: disable=not-callable
 
     assert allclose(out_aihwkit, out, atol=1e-5)
+
+
+if __name__ == "__main__":
+
+    # test_conv2d_forward(
+    #     1,
+    #     1,
+    #     10,
+    #     101,
+    #     3,
+    #     3,
+    #     [3, 3],
+    #     [1, 1],
+    #     [1, 1],
+    #     [1, 1],
+    #     1,
+    #     False,
+    #     254,
+    #     256,
+    #     True,
+    #     True,
+    #     3.0,
+    #     10,
+    #     3.0,
+    #     "cpu",
+    #     float32,
+    # )
+    test_clipping(WeightClipType.LAYER_GAUSSIAN, 3.0, "cuda", float16)

@@ -11,7 +11,9 @@
 # that they have been altered from the originals.
 
 """Functions for normal linear in PyTorch."""
+import os
 from typing import List, Tuple, Union
+from math import sqrt
 from torch import Tensor, randn_like, clamp, zeros_like
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
@@ -38,12 +40,27 @@ class UniformQuantize(Function):
             torch.Tensor: Quantized input.
         """
         # - Compute 1 / states if the number of states are provided
-        res = 2 / res if res > 1.0 else 2 * res
-        assert res > 0, "resolution is <= 0"
+        if isinstance(res, Tensor):
+            if res.ndim > 1:
+                assert res.size(0) == inp.size(
+                    0
+                ), f"res is tensor but first dim {res.size(0)} mismatches with first dim of input: {inp.size(0)}"
+            res = 2 / res if (res > 1.0).all() else 2 * res
+            assert (res > 0).all(), "resolution is <= 0"
+        else:
+            res = 2 / res if res > 1.0 else 2 * res
+            assert res > 0, "resolution is <= 0"
         output = inp if inplace else inp.clone()
         output = output / res
         # - Perform explicit rounding
-        output = output.round()
+        skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
+        if not skip_rounding:
+            output = output.round()
+        else:
+            is_testing = os.environ.get("AIHWKIT_TESTING", False)
+            if not is_testing:
+                del os.environ["_AIHWKIT_NO_ROUNDING"]
+                assert is_testing, "_AIHWKIT_NO_ROUNDING was set but we are not in testing mode."
         # - Scale back down
         output *= res
         return output
@@ -120,6 +137,11 @@ class InputRangeForward(Function):
     def backward(
         ctx: FunctionCtx, d_output: Tensor
     ) -> Tuple[Tensor, Tensor, None, None, None, None]:
+
+        # # DEBUG
+        # import pydevd
+
+        # pydevd.settrace(suspend=False, trace_only_current_thread=True)
 
         upper_thresh: Tensor
         lower_thresh: Tensor
@@ -208,6 +230,7 @@ class TorchLinear:
                         rpu_config.pre_post.input_range.decay,
                         rpu_config.pre_post.input_range.input_min_percentage,
                     )
+
                     inp_slice = inp_slice / input_range[slice_idx]
 
             # maybe do some quantization
@@ -229,10 +252,11 @@ class TorchLinear:
             ]:
                 need_assumed_wmax = True
                 reduce_assumed_wmax_for_weight_modifier = True
-            elif (
-                apply_weight_modifier
-                and rpu_config.modifier.type == WeightModifierType.ADD_NORMAL_PER_CHANNEL
-            ):
+            elif apply_weight_modifier and rpu_config.modifier.type in [
+                WeightModifierType.ADD_NORMAL_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+            ]:
                 need_assumed_wmax = True
                 need_assumed_wmax_per_channel = True
 
@@ -269,7 +293,17 @@ class TorchLinear:
                     # note that assumed_wmax has the correct shape here
                     if out_slice.ndim == 1:
                         assumed_wmax = assumed_wmax.view(-1)
-                    out_noise = assumed_wmax * rpu_config.forward.out_noise * randn_like(out_slice)
+                    wmax = (
+                        assumed_wmax
+                        if assumed_wmax.numel() == 1 or out_slice.ndim == 1
+                        else assumed_wmax.view(-1, out_slice.size(-1))
+                    )
+                    out_noise = (
+                        wmax
+                        * rpu_config.forward.out_noise
+                        / sqrt(len(in_sizes))
+                        * randn_like(out_slice)
+                    )
                 out_slice += out_noise
 
             if rpu_config.pre_post.input_range.enable:
@@ -280,6 +314,7 @@ class TorchLinear:
 
             current_upper += inp_size
 
+        out = out.to(dtype=weights.dtype)
         return out + bias if bias is not None else out
 
     @staticmethod
@@ -357,12 +392,10 @@ class TorchLinear:
                         x_max[slice_idx] = x_max[slice_idx] + x_max
                     elif ir_params.act_range_momentum == -1:
                         x_min[slice_idx] = min(
-                            x_min[slice_idx],
-                            x_min
+                            x_min[slice_idx], x_min
                         )  # type: ignore[call-overload]
                         x_max[slice_idx] = max(
-                            x_max[slice_idx],
-                            x_max
+                            x_max[slice_idx], x_max
                         )  # type: ignore[call-overload]
                     else:
                         x_min[slice_idx] = x_min[
@@ -407,14 +440,19 @@ class TorchLinear:
         assert assumed_wmax is not None, "Assumed wmax must be provided for weight modifier"
         if modifier.type in [
             WeightModifierType.DISCRETIZE,
+            WeightModifierType.DISCRETIZE_PER_CHANNEL,
             WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
         ]:
             res = modifier.res
             n_states = max(res, 1 / res)
             # assumed_wamax.item() would result in fp16 imprecision
             res = assumed_wmax / n_states  # type: ignore[assignment]
 
-        if modifier.type == WeightModifierType.DISCRETIZE:
+        if modifier.type in [
+            WeightModifierType.DISCRETIZE,
+            WeightModifierType.DISCRETIZE_PER_CHANNEL,
+        ]:
             # - Discretize the weights on the fly and backprob through them
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
         elif modifier.type in [
@@ -424,7 +462,10 @@ class TorchLinear:
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
-        elif modifier.type == WeightModifierType.DISCRETIZE_ADD_NORMAL:
+        elif modifier.type in [
+            WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+        ]:
             inp_weight = UniformQuantize.apply(inp_weight, res, True)
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)

@@ -260,36 +260,34 @@ def fast_abs_max(weights: Tensor):
     return per_channel_amax
 
 
-def sliced_fast_abs_max(weights: Tensor, split_sizes: list[int]):
+def sliced_fast_abs_max(weights: Tensor, upper_end_of_slices: Tensor):
     """
     Computest the per-channel absolute maximum of the weights.
 
     Args:
         weights (torch.Tensor): [n_cols, n_rows], x @ weights.T is assumed.
             Computes amax over the rows.
-        split_sizes (list[int]): list of sizes for the splits across input dimension.
-            256 -> [128, 128], 257 -> [85, 85, 86]
+        upper_end_of_slices (Tensor): list of sizes for the splits across input dimension,
+            accumulated
+            256 -> [128, 128] -> [128, 256], 257 -> [85, 85, 86] -> [85, 170, 256]
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: [1],[n_cols], the per-tensor abs max
             and the per-channel abs max.
     """
-    if len(split_sizes) == 1:
-        return fast_abs_max(weights)
+    n_splits = upper_end_of_slices.numel()
+    if n_splits == 1:
+        per_channel_amax = weights.abs().amax(dim=1)
+        per_channel_amax = per_channel_amax.view(1, -1)
+        return per_channel_amax
 
     assert weights.ndim == 2, "weight matrix shape must have 2 dimensions"
     assert weights.is_contiguous(), "weight matrix must be contiguous"
     n_cols, n_rows = weights.shape
 
-    # [6, 5, 5] -> [6, 11, 16] shows the end of the blocks
-    split_upper_bounds = tensor(split_sizes, device=weights.device).cumsum(dim=0, dtype=int32)
-
     # allocate output tensors
     per_channel_amax = full(
-        size=(len(split_sizes), n_cols),
-        fill_value=float("-inf"),
-        dtype=float32,
-        device=weights.device,
+        size=(n_splits, n_cols), fill_value=float("-inf"), dtype=float32, device=weights.device
     )
 
     # invoke kernel
@@ -301,12 +299,12 @@ def sliced_fast_abs_max(weights: Tensor, split_sizes: list[int]):
 
     sliced_fast_abs_max_kernel[grid](
         weights,
-        split_upper_bounds,
+        upper_end_of_slices,
         per_channel_amax,
         weights.stride(0),
         weights.stride(1),
         per_channel_amax.stride(0),
-        len(split_sizes),
+        n_splits,
         n_cols,
         n_rows,
     )
@@ -324,21 +322,20 @@ if __name__ == "__main__":
         base, extra = divmod(size, n_splits)
         return [base + (i < extra) for i in range(n_splits)]
 
-    def bench(weights: Tensor, split_sizes: list[int]):
+    def bench(weights: Tensor, upper_end_of_slices: Tensor):
         """Torch groundtruth function"""
-        if len(split_sizes) == 1:
+        n_splits = upper_end_of_slices.numel()
+        if n_splits == 1:
             return weights.abs().amax(dim=1)
-        # [6, 5, 5] -> [6, 11, 16] shows the end of the blocks
-        split_upper_bounds = tensor(split_sizes, device=weights.device).cumsum(dim=0, dtype=int32)
         # allocate output tensors
         per_channel_amax = full(
-            size=(len(split_sizes), weights.size(0)),
+            size=(n_splits, weights.size(0)),
             fill_value=float("-inf"),
             dtype=weights.dtype,
             device=weights.device,
         )
-        for slice_idx, upper in enumerate(split_upper_bounds):
-            start = 0 if slice_idx == 0 else split_upper_bounds[slice_idx - 1]
+        for slice_idx, upper in enumerate(upper_end_of_slices):
+            start = 0 if slice_idx == 0 else upper_end_of_slices[slice_idx - 1]
             end = upper
             slice_weights = weights[:, start:end]  # type: ignore[misc]
             per_channel_amax[slice_idx] = slice_weights.abs().amax(dim=1)
@@ -347,7 +344,7 @@ if __name__ == "__main__":
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=["n_cols", "n_rows"],
-            x_vals=[128 * i for i in range(2, 33)],
+            x_vals=[128 * i for i in range(8, 40, 4)],
             line_arg="provider",
             line_vals=["torch", "triton"],
             line_names=["PyTorch", "Triton"],
@@ -369,18 +366,24 @@ if __name__ == "__main__":
         Returns:
             Tuple[float]: Median, min, max of the runtimes in ms
         """
+        print(f"{provider}: Hidden size {n_cols}")
         weights = randn((n_cols, n_rows), device="cuda", dtype=float16)
         split_sizes = get_split_size(n_rows, max_size=128)
+        upper_end_of_slices = (
+            tensor(split_sizes, device=weights.device, dtype=weights.dtype)
+            .cumsum(dim=0, dtype=int32)
+            .contiguous()
+        )
 
         quantiles = [0.5, 0.2, 0.8]
 
         if provider == "torch":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: bench(weights, split_sizes), quantiles=quantiles
+                lambda: bench(weights, upper_end_of_slices), quantiles=quantiles
             )
         if provider == "triton":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
-                lambda: sliced_fast_abs_max(weights, split_sizes), quantiles=quantiles
+                lambda: sliced_fast_abs_max(weights, upper_end_of_slices), quantiles=quantiles
             )
         return time_ms, max_ms, min_ms
 
@@ -391,7 +394,12 @@ if __name__ == "__main__":
             split_sizes_ = get_split_size(n_rows_, max_size=128)
             print(f"n_cols: {n_cols_}, n_rows: {n_rows_}")
             weights_ = randn((n_cols_, n_rows_), device="cuda", dtype=float32)
+            upper_end_of_slices_ = (
+                tensor(split_sizes_, device=weights_.device, dtype=weights_.dtype)
+                .cumsum(dim=0, dtype=int32)
+                .contiguous()
+            )
             amax_ = weights_.abs().amax(dim=1)
-            amax_ = bench(weights_, split_sizes_)
-            triton_amax = sliced_fast_abs_max(weights_, split_sizes_)
+            amax_ = bench(weights_, upper_end_of_slices_)
+            triton_amax = sliced_fast_abs_max(weights_, upper_end_of_slices_)
             assert allclose(amax_, triton_amax)

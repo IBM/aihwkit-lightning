@@ -13,7 +13,8 @@
 """Module class for analog linear layer."""
 from typing import Optional, Tuple, List
 import os
-from torch import Tensor, cuda, empty, zeros
+from logging import warning
+from torch import Tensor, cuda, empty, zeros, tensor, int32
 from torch.nn import Linear, Parameter
 from aihwkit_lightning.simulator.configs import (
     TorchInferenceRPUConfig,
@@ -63,6 +64,11 @@ class AnalogLinear(Linear, AnalogLayerBase):
 
         max_input_size = rpu_config.mapping.max_input_size
         self.in_sizes = self.get_split_sizes(in_features, max_input_size)
+        self.upper_end_of_slices = (
+            tensor(self.in_sizes, device=device, dtype=dtype)
+            .cumsum(dim=0, dtype=int32)
+            .contiguous()
+        )
 
         if rpu_config.pre_post.input_range.enable:
             # for every vertical tile, we have an input range
@@ -106,12 +112,16 @@ class AnalogLinear(Linear, AnalogLayerBase):
             modified_weights = self.weight.clone()
 
         triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
-        if TRITON_AVAIL and len(self.in_sizes) > 1 and triton_enabled:
+        if triton_enabled and not TRITON_AVAIL:
+            warning("AIHWKIT_USE_TRITON is set, but triton is not installed")
+        if TRITON_AVAIL and triton_enabled:
+            self.upper_end_of_slices = self.upper_end_of_slices.to(device=modified_weights.device)
             out = TritonLinear.apply(
                 inp,
                 modified_weights,
                 self.input_range,
-                self.in_sizes,
+                self.input_range_update_idx,
+                self.upper_end_of_slices,
                 self.rpu_config,
                 self.training,
                 apply_weight_modifier,

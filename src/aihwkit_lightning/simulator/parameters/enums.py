@@ -26,6 +26,9 @@ class WeightModifierType(Enum):
     DISCRETIZE = "Discretize"
     """Quantize the weights."""
 
+    DISCRETIZE_PER_CHANNEL = "DiscretizePerChannel"
+    """Quantize the weights per channel."""
+
     ADD_NORMAL = "AddNormal"
     """Additive Gaussian noise."""
 
@@ -34,6 +37,9 @@ class WeightModifierType(Enum):
 
     DISCRETIZE_ADD_NORMAL = "DiscretizeAddNormal"
     """First discretize and then additive Gaussian noise."""
+
+    DISCRETIZE_ADD_NORMAL_PER_CHANNEL = "DiscretizeAddNormalPerChannel"
+    """First discretize per channel and then additive Gaussian noise per channel."""
 
 
 class WeightClipType(Enum):
