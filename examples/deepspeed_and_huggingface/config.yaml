@@ -1,0 +1,63 @@
+general:
+  example_directory: ~/scratch/aihwkit-lightning-example/
+  ds_config_path: ~/scratch/aihwkit-lightning/examples/deepspeed_and_huggingface/ds_config.json  # for DeepSpeed
+  run_name: my-run-name  # for wandb
+
+training_args:
+  seed: 0
+  adam_beta1: 0.9
+  adam_beta2: 0.98
+  adam_epsilon: 1.0e-06
+  attention_dropout: 0.0
+  batch_size: 1
+  do_eval: true
+  do_train: true
+  embd_pdrop: 0.0
+  eval_batch_size: 1
+  eval_only: false
+  eval_steps: 31
+  evaluation_strategy: steps
+  fp: false  # use analog model
+  gradient_accumulation_steps: 4
+  gradient_checkpointing: true
+  greater_is_better: false
+  load_best_model_at_end: true
+  logging_steps: 31
+  logging_strategy: steps
+  lr: 1.0e-06
+  lr_scheduler_type: polynomial
+  max_grad_norm: 1.0
+  num_gpus: 8
+  num_train_epochs: 1
+  max_steps: -1
+  overwrite_output_dir: true
+  report_to: wandb
+  resid_pdrop: 0.0
+  rms_norm_eps: 1.0e-05
+  save_steps: 31
+  save_strategy: steps
+  save_total_limit: 1
+  task_name: pretrain
+  warmup_ratio: 0.016
+  weight_decay: 0.01
+
+rpu_config:
+  clip_sigma: 2.5
+  clip_type: gaussian
+  forward_inp_res: 254
+  forward_out_noise: 0.0
+  forward_out_noise_per_channel: false
+  mapping_max_input_size: -1
+  modifier_enable_during_test: false
+  modifier_res: -1
+  modifier_std_dev: 0.023
+  modifier_type: add_gauss
+  input_range_decay: 0.001
+  input_range_enable: true
+  input_range_fast_mode: false
+  input_range_init_from_data: 500
+  input_range_init_std_alpha: 3.0
+  input_range_init_value: 3.0
+  input_range_init_with_max: false
+  input_range_input_min_percentage: 0.95
+  input_range_learn_input_range: true

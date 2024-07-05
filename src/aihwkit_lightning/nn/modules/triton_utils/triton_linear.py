@@ -12,6 +12,7 @@
 
 """Functions for fast linear in triton."""
 import os
+from typing import Tuple
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
 from torch.autograd import Function
@@ -24,20 +25,21 @@ from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 # fmt: off
 @triton.autotune(
+        # pylint: disable=line-too-long
     configs=[
-        triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),
-        triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),
-        triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5, num_warps=2),
-        triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5, num_warps=2),
+        triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_OUT": 128, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_OUT": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5, num_warps=2),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5, num_warps=2),  # noqa: E501
     ],
     key=["hidden_size", "out_size"],
 )
 @triton.jit
-def modifier_kernel(
+def modifier_kernel(  # pylint: disable=too-many-arguments
     # pointers to tensors
     weights_ptr,  # 2D [hidden_size, out_size]
     assumed_wmax_ptr,  # 2D [num_slices, out_size]
@@ -134,20 +136,21 @@ def modifier_kernel(
 
 
 @triton.autotune(
+    # pylint: disable=line-too-long
     configs=[
-        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 256,"BLOCK_SIZE_HIDDEN": 64,"GROUP_SIZE_INP": 8}, num_stages=3, num_warps=8),
-        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 256,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
-        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 128,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
-        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 64,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
-        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 128,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
-        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 32,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),
-        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 32,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=5 ,num_warps=2),
-        triton.Config({"BLOCK_SIZE_INP": 32,"BLOCK_SIZE_OUT": 64,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=5 ,num_warps=2),
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 256,"BLOCK_SIZE_HIDDEN": 64,"GROUP_SIZE_INP": 8}, num_stages=3, num_warps=8),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 256,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 128,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 64,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 128,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 128,"BLOCK_SIZE_OUT": 32,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=4 ,num_warps=4),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 64,"BLOCK_SIZE_OUT": 32,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=5 ,num_warps=2),  # noqa: E501
+        triton.Config({"BLOCK_SIZE_INP": 32,"BLOCK_SIZE_OUT": 64,"BLOCK_SIZE_HIDDEN": 32,"GROUP_SIZE_INP": 8,} ,num_stages=5 ,num_warps=2),  # noqa: E501
     ],
     key=["inp_size", "hidden_size", "out_size"],
 )
 @triton.jit
-def matmul_kernel(
+def matmul_kernel(  # pylint: disable=too-many-arguments
     # pointers to tensors
     inp_ptr,  # 2D [inp_size, hidden_size]
     weights_ptr,  # 2D [hidden_size, out_size]
@@ -186,21 +189,22 @@ def matmul_kernel(
     BLOCK_SIZE_OUT: tl.constexpr,
     GROUP_SIZE_INP: tl.constexpr,
 ):
-    # cldiv = lambda a, b : (a + b - 1) // b # How often does b fit into a (rounded up)
-
-    # Example GROUP_SIZE_INP: 8, inp_size: 256, hidden_size: 64 out_size: 256
-    # BLOCK_SIZE_INP: 32 BLOCK_SIZE_HIDDEN: 16 BLOCK_SIZE_OUT: 32
-    # Grid: 8 * 8 -> PIDs 0 1 2 3 ... 63
-
-    pid = tl.program_id(axis=0)  # 16
-    num_pid_m = tl.cdiv(inp_size, BLOCK_SIZE_INP)  # 8
-    num_pid_n = tl.cdiv(out_size, BLOCK_SIZE_OUT)  # 8
-    num_pid_in_group = GROUP_SIZE_INP * num_pid_n  # 2 * 8 = 16
-    group_id = pid // num_pid_in_group  # 0 .. 15 belong to 0 and 16 .. 31 to 1 -> 1
-    first_pid_m = group_id * GROUP_SIZE_INP  # 0
-    GROUP_SIZE_INP = min(num_pid_m - first_pid_m, GROUP_SIZE_INP)  # 2
-    pid_m = first_pid_m + ((pid % num_pid_in_group) % GROUP_SIZE_INP)  # 1
-    pid_n = (pid % num_pid_in_group) // GROUP_SIZE_INP  # 0
+    """
+    Computes the block-wise matmul.
+    Applies input range to the input and quantizes it. Converts
+    back to the original range before accumulating the dot products.
+    Can handle different input ranges per slice in the input dimension.
+    Stores the MVM result inp_ptr @ weights_ptr in out_ptr.
+    """
+    pid = tl.program_id(axis=0)
+    num_pid_m = tl.cdiv(inp_size, BLOCK_SIZE_INP)
+    num_pid_n = tl.cdiv(out_size, BLOCK_SIZE_OUT)
+    num_pid_in_group = GROUP_SIZE_INP * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_SIZE_INP
+    GROUP_SIZE_INP = min(num_pid_m - first_pid_m, GROUP_SIZE_INP)
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % GROUP_SIZE_INP)
+    pid_n = (pid % num_pid_in_group) // GROUP_SIZE_INP
 
     accumulator = tl.zeros((BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32)
 
@@ -244,7 +248,6 @@ def matmul_kernel(
         # load the correct input range
         input_range = tl.load(input_range_ptr + slice_idx)
 
-        # DEBUG DEBUG
         offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
         a_ptrs = inp_ptr + (
             offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
@@ -259,15 +262,6 @@ def matmul_kernel(
             current_upper = min(
                 ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
-
-            # offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
-            # a_ptrs = inp_ptr + (
-            #     offs_am[:, None] * stride_inp_inp_size + offs_k[None, :] * stride_inp_hidden_size
-            # )
-            # b_ptrs = weights_ptr + (
-            #     offs_k[:, None] * stride_weights_hidden_size
-            #     + offs_bn[None, :] * stride_weights_out_size
-            # )
 
             a = tl.load(
                 a_ptrs,
@@ -346,7 +340,10 @@ def matmul_kernel(
 
 
 class TritonLinear(Function):
+    """autograd.Function for triton-based linear layer."""
+
     @staticmethod
+    # type: ignore[override]
     def forward(
         ctx: FunctionCtx,
         inp: Tensor,
@@ -357,7 +354,26 @@ class TritonLinear(Function):
         rpu_config: TorchInferenceRPUConfig,
         training: bool,
         apply_weight_modifier: bool,
-    ):
+    ) -> Tensor:
+        """
+        Forward of the triton-based linear layer
+
+        Args:
+            ctx: Context.
+            inp: Input matrix
+            weights: Weight matrix. inp @ weights.T is being performed
+            input_range: Tensor of input range(s)
+            input_range_update_idx: How often did every input range
+                get updated by data already?
+            upper_end_of_slices: [128, 256] if a 256-sized layer is
+                split by 128-sized chunks
+            rpu_config: The configuration for HW-aware training
+            training: Are we in training or eval mode
+            apply_weight_modifier: Do we need to call the weight modifier kernel or not
+
+        Returns:
+            Gradients w.r.t. inputs, weights and input ranges.
+        """
         assert input_range.is_contiguous(), "input_range not contiguous"
         assert weights.is_contiguous(), "weights not contiguous"
         assert inp.is_contiguous(), "inp not contiguous"
@@ -517,7 +533,17 @@ class TritonLinear(Function):
         return out
 
     @staticmethod
-    def backward(ctx: FunctionCtx, grad_output: Tensor):  # type: ignore
+    # type: ignore[override]
+    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, Tensor, Tensor, None, None, None, None, None]:  # type: ignore
+        """Straight-through estimator for linear layer
+
+        Args:
+            ctx: Context.
+            grad_output: Backward flowing gradient w.r.t. outputs.
+
+        Returns:
+            Gradients w.r.t. inputs, weights and input ranges.
+        """
         # # DEBUG
         # import pydevd
         # pydevd.settrace(suspend=False, trace_only_current_thread=True)
