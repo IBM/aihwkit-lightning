@@ -42,9 +42,9 @@ class UniformQuantize(Function):
         # - Compute 1 / states if the number of states are provided
         if isinstance(res, Tensor):
             if res.ndim > 1:
-                assert res.size(0) == inp.size(
-                    0
-                ), f"res is tensor but first dim {res.size(0)} mismatches with first dim of input: {inp.size(0)}"
+                # pylint: disable=line-too-long
+                err_string = f"res is tensor but first dim {res.size(0)} mismatches with first dim of input: {inp.size(0)}"  # noqa: E501
+                assert res.size(0) == inp.size(0), err_string
             res = 2 / res if (res > 1.0).all() else 2 * res
             assert (res > 0).all(), "resolution is <= 0"
         else:
@@ -172,6 +172,7 @@ class InputRangeForward(Function):
 class TorchLinear:
     """Linear layer with RPU support."""
 
+    # pylint: disable=too-many-arguments, too-many-locals, too-many-branches, too-many-statements
     @staticmethod
     def linear(
         inp: Tensor,
@@ -314,7 +315,7 @@ class TorchLinear:
 
             current_upper += inp_size
 
-        out = out.to(dtype=weights.dtype)
+        out = out.to(dtype=weights.dtype)  # type: ignore[attr-defined]
         return out + bias if bias is not None else out
 
     @staticmethod
@@ -373,6 +374,11 @@ class TorchLinear:
         Args:
             values: tensor to clip
             slice_idx: index of the input slice
+            rpu_config: RPUConfig used
+            input_range: Input ranges per slice
+            input_range_update_idx: How many times each input range got updated already
+            x_min: Minimum value observed so far.
+            x_max: Maximum value observed so far.
             update_from_data: whether to update from data if applicable
 
         Returns:
@@ -426,6 +432,7 @@ class TorchLinear:
         Args:
             inp_weight: Input weights.
             assumed_wmax: Assumed maximum weight value.
+            rpu_config: RPUConfig used.
 
         Raises:
             ConfigError: Unsupported/unknown weight modifier type.

@@ -33,10 +33,7 @@ from transformers import (
     TrainingArguments,
     DataCollatorForLanguageModeling,
 )
-from transformers.utils.logging import (
-    enable_default_handler,
-    enable_explicit_format,
-)
+from transformers.utils.logging import enable_default_handler, enable_explicit_format
 
 from utils import CustomTrainer, get_args, create_rpu_config
 from aihwkit_lightning.nn.conversion import convert_to_analog
@@ -44,7 +41,10 @@ from aihwkit_lightning.nn.conversion import convert_to_analog
 
 IS_CUDA = torch.cuda.is_available()
 
+
 def main():
+    # pylint: disable=missing-function-docstring, too-many-locals
+
     log_level = datasets.logging.INFO
     datasets.utils.logging.set_verbosity(log_level)
     transformers.logging.set_verbosity_info()
@@ -65,23 +65,24 @@ def main():
     kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=1801))
     accelerator = Accelerator(log_with="wandb", kwargs_handlers=[kwargs])
     accelerator.init_trackers(
-        project_name="AIHWKIT Lightning",
-        init_kwargs={"wandb": {"name": args.run_name}},
+        project_name="AIHWKIT Lightning", init_kwargs={"wandb": {"name": args.run_name}}
     )
 
     with accelerator.main_process_first():
         # load the model
         example_dir = os.path.expanduser(args.example_directory)
-        model = BertForMaskedLM.from_pretrained("google-bert/bert-base-uncased", cache_dir=example_dir)
-        tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased", cache_dir=example_dir)
+        model = BertForMaskedLM.from_pretrained(
+            "google-bert/bert-base-uncased", cache_dir=example_dir
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            "google-bert/bert-base-uncased", cache_dir=example_dir
+        )
         dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1", cache_dir=example_dir)
         dataset["train"] = dataset["train"].select(list(range(1000)))
+
         def preprocess_function(examples):
             result = tokenizer(
-                examples["text"],
-                padding="max_length",
-                max_length=512,
-                truncation=True
+                examples["text"], padding="max_length", max_length=512, truncation=True
             )
             return result
 
@@ -96,10 +97,7 @@ def main():
         if not args.fp:
             # Convert the model into an anlog model
             rpu_config = create_rpu_config(args)
-            model = convert_to_analog(
-                model,
-                rpu_config=rpu_config,
-            )
+            model = convert_to_analog(model, rpu_config=rpu_config)
 
     # count the parameters
     param_count = 0
@@ -150,14 +148,16 @@ def main():
         bf16=False,
         bf16_full_eval=False,
         greater_is_better=args.greater_is_better,
-        fp16=True if IS_CUDA else False,
-        fp16_full_eval=True if IS_CUDA else False,
+        fp16=IS_CUDA,
+        fp16_full_eval=IS_CUDA,
         torch_compile=False,
         deepspeed=args.ds_config_path,
     )
 
     # define trainer
-    lm_data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=True, mlm_probability=0.15)
+    lm_data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer, mlm=True, mlm_probability=0.15
+    )
 
     trainer = CustomTrainer(
         model=model,
@@ -174,9 +174,7 @@ def main():
 
     eval_result = trainer.evaluate()
     if accelerator.is_main_process:
-        print(
-            f"Saving state...\nBest results on validation set are: \n{eval_result}"
-        )
+        print(f"Saving state...\nBest results on validation set are: \n{eval_result}")
     trainer.save_state()
 
     if accelerator.is_main_process:

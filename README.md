@@ -15,12 +15,14 @@ pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/
 
 ## Examples
 In the [examples] folder, we have some examples that show how to use the AIHWKIT-Lightning:
-- [SLURM + DeepSpeed + Huggingface Accelerate] shows how to do multi-node training of a language model using DeepSpeed, Slurm, Huggingface Accelerate and AIHWKIT-Lightning
+- [DeepSpeed + AIHWKIT-Lightning] shows how to integrate AIHWKIT-Lightning with DeepSpeed.
+- [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning] shows how to do multi-node training of a language model using DeepSpeed, Slurm, Huggingface Accelerate and AIHWKIT-Lightning.
 
 ## Contributing
 Install the development requirements.
 ```bash
 pip install -r requirements_dev.txt
+mypy --install-types
 ```
 Create a branch from the `main` branch and make a well-documented PR. Make sure to run the following before submitting the PR:
 ```bash
@@ -63,4 +65,5 @@ This project is licensed under [Apache License 2.0].
 
 [Apache License 2.0]: LICENSE.txt
 [examples]: examples/
-[SLURM + DeepSpeed + Huggingface Accelerate]: examples/deepspeed_and_huggingface/
+[SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning]: examples/deepspeed_and_huggingface/
+[DeepSpeed + AIHWKIT-Lightning]: examples/deepspeed_cifar10

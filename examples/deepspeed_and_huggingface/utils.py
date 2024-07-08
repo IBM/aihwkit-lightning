@@ -1,22 +1,30 @@
+# -*- coding: utf-8 -*-
+
+# (C) Copyright 2020, 2021, 2022, 2023, 2024 IBM. All Rights Reserved.
+#
+# This code is licensed under the Apache License, Version 2.0. You may
+# obtain a copy of this license in the LICENSE.txt file in the root directory
+# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# Any modifications or derivative works of this code must retain this
+# copyright notice, and modified files need to carry a notice indicating
+# that they have been altered from the originals.
+
+"""Utils for training example."""
+
+
 from typing import Union, Dict, Any
-import yaml
 import argparse
+import yaml
 import torch
 from transformers import Trainer
 from aihwkit_lightning.simulator.configs.configs import TorchInferenceRPUConfig
-from aihwkit_lightning.simulator.parameters.enums import (
-    WeightModifierType,
-    WeightClipType,
-)
+from aihwkit_lightning.simulator.parameters.enums import WeightModifierType, WeightClipType
+from aihwkit_lightning.exceptions import ArgumentError
 
 
 class CustomTrainer(Trainer):
-    def __init__(
-        self,
-        *args,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
+    """Custom trainer handling weight clipping."""
 
     # overwriting for clipping the weights
     def training_step(
@@ -26,15 +34,12 @@ class CustomTrainer(Trainer):
         Perform a training step on a batch of inputs.
         Subclass and override to inject custom behavior.
         Args:
-            model (`nn.Module`):
-                The model to train.
-            inputs (`Dict[str, Union[torch.Tensor, Any]]`):
-                The inputs and targets of the model.
-                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
-                argument `labels`. Check your model's documentation for all accepted arguments.
+            model: The model to train.
+            inputs: The inputs for for the training step.
         Return:
             `torch.Tensor`: The tensor with training loss on this batch.
         """
+
         model.train()
         inputs = self._prepare_inputs(inputs)
         with self.compute_loss_context_manager():
@@ -65,6 +70,8 @@ def create_rpu_config(args):
         args (Namespace): The namespace populated with fields.
     Returns:
         Union[InferenceRPUConfig,TorchInferenceRPUConfig]: The RPUConifg.
+    Raises:
+        ArgumentError: When wrong modes are passed.
     """
 
     rpu_config = TorchInferenceRPUConfig()
@@ -81,7 +88,7 @@ def create_rpu_config(args):
     elif args.clip_type == "none":
         clip_type = WeightClipType.NONE
     else:
-        raise Exception("Clip type not supported")
+        raise ArgumentError("Clip type not supported")
     rpu_config.clip.type = clip_type
 
     rpu_config.modifier.std_dev = args.modifier_std_dev
@@ -94,24 +101,20 @@ def create_rpu_config(args):
     elif args.modifier_type == "none":
         modifier_type = WeightModifierType.NONE
     else:
-        raise Exception("Unknown modifier type")
+        raise ArgumentError("Unknown modifier type")
     rpu_config.modifier.type = modifier_type
 
     rpu_config.mapping.max_input_size = args.mapping_max_input_size
 
     rpu_config.pre_post.input_range.enable = args.input_range_enable
-    rpu_config.pre_post.input_range.learn_input_range = (
-        args.input_range_learn_input_range
-    )
+    rpu_config.pre_post.input_range.learn_input_range = args.input_range_learn_input_range
     rpu_config.pre_post.input_range.init_value = args.input_range_init_value
     rpu_config.pre_post.input_range.fast_mode = args.input_range_fast_mode
     rpu_config.pre_post.input_range.init_with_max = args.input_range_init_with_max
     rpu_config.pre_post.input_range.init_from_data = args.input_range_init_from_data
     rpu_config.pre_post.input_range.init_std_alpha = args.input_range_init_std_alpha
     rpu_config.pre_post.input_range.decay = args.input_range_decay
-    rpu_config.pre_post.input_range.input_min_percentage = (
-        args.input_range_input_min_percentage
-    )
+    rpu_config.pre_post.input_range.input_min_percentage = args.input_range_input_min_percentage
     return rpu_config
 
 
@@ -119,6 +122,7 @@ class PrettySafeLoader(yaml.SafeLoader):
     """Allows specifying tuples in yaml config."""
 
     def construct_python_tuple(self, node):
+        """Create tuple."""
         return tuple(self.construct_sequence(node))
 
 
@@ -134,25 +138,26 @@ def check_and_eval_args(args):
     Returns:
         object: The modified command line arguments.
     """
-    for k, v in args.__dict__.items():
-        if k == "lr" and not isinstance(v, list):
+    for key, value in args.__dict__.items():
+        if key == "lr" and not isinstance(value, list):
             args.lr = float(args.lr)
-        if isinstance(v, str) and "lambda" in v:
-            setattr(args, k, eval(v))
-        elif isinstance(v, list):
+        if isinstance(value, str) and "lambda" in value:
+            setattr(args, key, eval(value))  # pylint: disable=eval-used
+        elif isinstance(value, list):
             new_l = []
-            for el in v:
-                if isinstance(el, str) and "lambda" in el:
-                    new_l.append(eval(el))
-                elif k == "lr":
-                    new_l.append(float(el))
+            for element in value:
+                if isinstance(element, str) and "lambda" in element:
+                    new_l.append(eval(element))  # pylint: disable=eval-used
+                elif key == "lr":
+                    new_l.append(float(element))
                 else:
-                    new_l.append(el)
-            setattr(args, k, new_l)
+                    new_l.append(element)
+            setattr(args, key, new_l)
     return args
 
 
 def get_args():
+    """Get the arguments and parse them."""
     args = create_parser()
     args = parse_args(args)
     args = check_and_eval_args(args)
@@ -160,15 +165,16 @@ def get_args():
 
 
 def create_parser():
+    """Create the parser that expects the config yaml."""
     parser = argparse.ArgumentParser()
-    g = parser.add_argument_group("Training Args")
-    g.add_argument("--config", dest="config", type=argparse.FileType(mode="r"))
+    group = parser.add_argument_group("Training Args")
+    group.add_argument("--config", dest="config", type=argparse.FileType(mode="r"))
     return parser
 
 
 def maybe_inf2float(val):
     """If it is a string with inf,-inf, return float"""
-    if isinstance(val, str) and (val == "inf" or val == "-inf"):
+    if isinstance(val, str) and (val in ["inf", "-inf"]):
         print(f"WARNING: String {val} casted to float")
         return float(val)
     return val

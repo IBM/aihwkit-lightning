@@ -42,7 +42,7 @@ from torch import zeros, Tensor, float32, tensor, cat, sqrt, empty
     reset_to_zero=["per_slice_sum_ptr"],
 )
 @triton.jit
-def per_slice_sum_kernel(
+def per_slice_sum_kernel(  # pylint: disable=too-many-locals
     # pointers to tensors
     inp_ptr,  # 2D [inp_size, hidden_size]
     upper_end_of_slices_ptr,  # 1D [num_slices]
@@ -55,9 +55,10 @@ def per_slice_sum_kernel(
     stride_inp_inp_size,
     stride_inp_hidden_size,
     # block sizes
-    BLOCK_SIZE_INP: tl.constexpr,
-    BLOCK_SIZE_HIDDEN: tl.constexpr,
+    BLOCK_SIZE_INP: tl.constexpr,  # pylint: disable=invalid-name
+    BLOCK_SIZE_HIDDEN: tl.constexpr,  # pylint: disable=invalid-name
 ):
+    """Compute the sum per slice."""
     pid = tl.program_id(axis=0)
     offs_am = pid * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)
     ir_range_lower = 0
@@ -79,13 +80,13 @@ def per_slice_sum_kernel(
             current_upper = min(
                 ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
-            a = tl.load(
+            inp_block = tl.load(
                 a_ptrs,
                 mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper),
                 other=0.0,
             )
-            a = a.to(tl.float32)
-            tl.atomic_add(per_slice_sum_ptr + slice_idx, tl.sum(a))
+            inp_block = inp_block.to(tl.float32)
+            tl.atomic_add(per_slice_sum_ptr + slice_idx, tl.sum(inp_block))
 
             # increment pointer
             offs_k += current_upper - current_lower
@@ -119,7 +120,7 @@ def per_slice_sum_kernel(
     reset_to_zero=["per_slice_centered_and_squared_ptr"],
 )
 @triton.jit
-def center_and_square_kernel(
+def center_and_square_kernel(  # pylint: disable=too-many-locals, too-many-arguments
     # pointers to tensors
     inp_ptr,  # 2D [inp_size, hidden_size]
     upper_end_of_slices_ptr,  # 1D [num_slices]
@@ -133,9 +134,10 @@ def center_and_square_kernel(
     stride_inp_inp_size,
     stride_inp_hidden_size,
     # block sizes
-    BLOCK_SIZE_INP: tl.constexpr,
-    BLOCK_SIZE_HIDDEN: tl.constexpr,
+    BLOCK_SIZE_INP: tl.constexpr,  # pylint: disable=invalid-name
+    BLOCK_SIZE_HIDDEN: tl.constexpr,  # pylint: disable=invalid-name
 ):
+    """Center and square each slice."""
     pid = tl.program_id(axis=0)
     offs_am = pid * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)
     ir_range_lower = 0
@@ -155,17 +157,17 @@ def center_and_square_kernel(
             current_upper = min(
                 ir_range_upper, ir_range_lower + (k + 1) * BLOCK_SIZE_HIDDEN, hidden_size
             )
-            
-            a = tl.load(
+
+            inp_block = tl.load(
                 a_ptrs,
                 mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper),
                 other=current_mean,
             )
-            a = a.to(tl.float32)
-            a_centered = a - current_mean
+            inp_block = inp_block.to(tl.float32)
+            a_centered = inp_block - current_mean
             centered_and_squared = tl.sum((a_centered * a_centered))
             tl.atomic_add(per_slice_centered_and_squared_ptr + slice_idx, centered_and_squared)
-            
+
             # increment pointer
             offs_k += current_upper - current_lower
             a_ptrs += (current_upper - current_lower) * stride_inp_hidden_size
@@ -175,6 +177,7 @@ def center_and_square_kernel(
 # fmt: on
 
 
+# pylint: disable=redefined-outer-name
 def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
     """
     Given inputs of shape [..., hidden_size] and upper_end_of_slices Tensor
@@ -185,7 +188,7 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
     inps[..., 16:32].
 
     Args:
-        inps: Tensor of shape [..., hidden_size]
+        inp: Tensor of shape [..., hidden_size]
         upper_end_of_slices: Tensor of shape [num_slices]
     Returns:
         stds: Tensor of shape [num_slices]
@@ -245,7 +248,7 @@ def naive_per_slice_std(inp: Tensor, upper_end_of_slices: Tensor):
     inps[..., 16:32].
 
     Args:
-        inps: Tensor of shape [..., hidden_size]
+        inp: Tensor of shape [..., hidden_size]
         upper_end_of_slices: Tensor of shape [num_slices]
     Returns:
         stds: Tensor of shape [num_slices]
@@ -262,7 +265,7 @@ def naive_per_slice_std(inp: Tensor, upper_end_of_slices: Tensor):
 
 
 if __name__ == "__main__":
-    from torch import randn, float32, float16, allclose, manual_seed
+    from torch import randn, float16, allclose, manual_seed
 
     manual_seed(0)
 
@@ -298,7 +301,6 @@ if __name__ == "__main__":
         Benchmarks sliced std computation
 
         Args:
-            inp_size (int): Number of inputs
             hidden_size (int): Hidden dimension
             provider (int): torch or triton
 

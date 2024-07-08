@@ -45,6 +45,8 @@ from aihwkit_lightning.optim import AnalogOptimizer
 TRITON_AVAIL = False
 try:
     import triton
+
+    # pylint: disable=ungrouped-imports
     from aihwkit_lightning.nn.modules.linear import is_at_least_volta_gpu
 
     if not is_at_least_volta_gpu():
@@ -321,6 +323,7 @@ def benchmark_aihwkit_lightning():
 
 
 def benchmark_triton_implementation():
+    """Test the speed of the triton implementation compared to AIHWKIT."""
     assert TRITON_AVAIL, "Triton is not available"
 
     def bench(layer: AnalogLinear, inp: Tensor, use_triton: bool):
@@ -344,7 +347,7 @@ def benchmark_triton_implementation():
             args={},
         )
     )
-    def benchmark(n_cols: int, n_rows: int, provider: str):
+    def layer_benchmark(n_cols: int, n_rows: int, provider: str):
         """
         Benchmark the linear layer.
 
@@ -381,7 +384,7 @@ def benchmark_triton_implementation():
         print(f"{provider}: Linear layer shape {n_rows} x {n_cols} time {time_ms}")
         return time_ms, max_ms, min_ms
 
-    benchmark.run(print_data=True, save_path="debug/linear_performance_fwd_torch_vs_triton")
+    layer_benchmark.run(print_data=True, save_path="debug/linear_performance_fwd_torch_vs_triton")
 
 
 if __name__ == "__main__":

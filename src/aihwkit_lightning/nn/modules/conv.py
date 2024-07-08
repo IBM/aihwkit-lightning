@@ -16,7 +16,7 @@
 
 from typing import Optional, Tuple, Union, List
 import os
-from torch import Tensor, cuda, empty, zeros
+from torch import Tensor, cuda, empty, zeros, tensor, int32
 from torch.nn import Parameter
 from torch.nn.functional import unfold
 from torch.nn.modules.conv import _ConvNd, Conv2d
@@ -101,6 +101,11 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         self.rpu_config = rpu_config
 
         self.in_sizes = self.get_split_sizes(self.in_features, rpu_config.mapping.max_input_size)
+        self.upper_end_of_slices = (
+            tensor(self.in_sizes, device=device, dtype=dtype)
+            .cumsum(dim=0, dtype=int32)
+            .contiguous()
+        )
 
         if rpu_config.pre_post.input_range.enable:
             # for every vertical tile, we have an input range
@@ -297,16 +302,18 @@ class AnalogConv2d(_AnalogConvNd):
             dilation=self.dilation,
             padding=self.padding,
             stride=self.stride,
-        ).transpose(-1, -2)
+        ).transpose(-1, -2).contiguous()
 
         modified_weights = modified_weights.view(self.out_channels, -1)
         triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
-        if TRITON_AVAIL and len(self.in_sizes) > 1 and triton_enabled:
+        if TRITON_AVAIL and triton_enabled:
+            self.upper_end_of_slices = self.upper_end_of_slices.to(device=modified_weights.device)
             out = TritonLinear.apply(
                 x_input_,
                 modified_weights,
                 self.input_range,
-                self.in_sizes,
+                self.input_range_update_idx,
+                self.upper_end_of_slices,
                 self.rpu_config,
                 self.training,
                 apply_weight_modifier,
@@ -327,7 +334,7 @@ class AnalogConv2d(_AnalogConvNd):
                 apply_weight_modifier=apply_weight_modifier,
             )
 
-        out = out.transpose(-1, -2)
+        out = out.transpose(-1, -2).contiguous()
         out_size = (
             im_shape[-2] + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1
         ) // self.stride[0] + 1

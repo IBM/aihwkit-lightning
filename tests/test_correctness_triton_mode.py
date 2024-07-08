@@ -63,7 +63,8 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("weight_modifier_res", [2**8 - 2, 1 / (2**8 - 2)])
 @mark.parametrize("device", ["cuda"])  # cpu not supported for triton
 @mark.parametrize("dtype", [float32, float16, bfloat16])
-def test_linear_forward(  # pylint: disable=too-many-arguments
+# pylint: disable=too-many-arguments, too-many-branches, too-many-statements
+def test_linear_forward(
     bsz: int,
     num_inp_dims: int,
     inp_size: int,
@@ -159,7 +160,7 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
         delta_triton = out_triton - out_noise_free
         delta_torch = out - out_noise_free
         assert allclose(delta_torch.std(), delta_triton.std(), atol=1e-2)
-    elif not weight_modifier in [
+    elif weight_modifier not in [
         WeightModifierType.NONE,
         WeightModifierType.DISCRETIZE,
         WeightModifierType.DISCRETIZE_PER_CHANNEL,

@@ -9,7 +9,7 @@ First, install PyTorch.
 We had to make some changes in DeepSpeed, so it might be better to clone DeepSpeed from `https://github.com/microsoft/DeepSpeed`, step into the repo and execute `pip install -e .`.
 ```bash
 pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ triton-nightly
-pip install deepspeed
+[OPTIONAL] pip install deepspeed
 pip install transformers
 pip install accelerate
 pip install datasets
