@@ -121,7 +121,7 @@ def put(self, table):
 For us, this led to race conditions, and commenting it out seemed to work.
 
 
-Also, in ..
+Also, in `DeepSpeed/deepspeed/runtime/fp16/loss_scaler.py`
 we changed parts of the `update_scale` function to
 ```python
 def update_scale(self, overflow):
