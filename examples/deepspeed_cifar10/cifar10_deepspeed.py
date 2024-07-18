@@ -25,9 +25,15 @@ import torchvision.transforms as transforms
 import deepspeed
 from deepspeed.accelerator import get_accelerator
 from deepspeed.utils import logger
+
 logger.setLevel("WARNING")
 from aihwkit_lightning.nn.conversion import convert_to_analog
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType, WeightModifierType
+from aihwkit_lightning.simulator.configs import (
+    TorchInferenceRPUConfig,
+    WeightClipType,
+    WeightModifierType,
+)
+
 
 def add_argument():
     parser = argparse.ArgumentParser(description="CIFAR")
@@ -40,17 +46,10 @@ def add_argument():
         help="use triton or not in AIHWKIT-Lightning",
     )
     parser.add_argument(
-        "-e",
-        "--epochs",
-        default=30,
-        type=int,
-        help="number of total epochs (default: 30)",
+        "-e", "--epochs", default=30, type=int, help="number of total epochs (default: 30)"
     )
     parser.add_argument(
-        "--local_rank",
-        type=int,
-        default=-1,
-        help="local rank passed from distributed launcher",
+        "--local_rank", type=int, default=-1, help="local rank passed from distributed launcher"
     )
     parser.add_argument(
         "--log-interval",
@@ -70,11 +69,7 @@ def add_argument():
 
     # For ZeRO Optimization.
     parser.add_argument(
-        "--stage",
-        default=0,
-        type=int,
-        choices=[0, 1, 2, 3],
-        help="Datatype used for training",
+        "--stage", default=0, type=int, choices=[0, 1, 2, 3], help="Datatype used for training"
     )
 
     # Include DeepSpeed configuration arguments.
@@ -92,20 +87,11 @@ def get_ds_config(args):
         "steps_per_print": args.log_interval,
         "optimizer": {
             "type": "Adam",
-            "params": {
-                "lr": 0.001,
-                "betas": [0.8, 0.999],
-                "eps": 1e-8,
-                "weight_decay": 3e-7,
-            },
+            "params": {"lr": 0.001, "betas": [0.8, 0.999], "eps": 1e-8, "weight_decay": 3e-7},
         },
         "scheduler": {
             "type": "WarmupLR",
-            "params": {
-                "warmup_min_lr": 0,
-                "warmup_max_lr": 0.001,
-                "warmup_num_steps": 1000,
-            },
+            "params": {"warmup_min_lr": 0, "warmup_max_lr": 0.001, "warmup_num_steps": 1000},
         },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
@@ -167,18 +153,7 @@ def test(model_engine, testset, local_device, target_dtype, test_batch_size=4):
 
     """
     # The 10 classes for CIFAR10.
-    classes = (
-        "plane",
-        "car",
-        "bird",
-        "cat",
-        "deer",
-        "dog",
-        "frog",
-        "horse",
-        "ship",
-        "truck",
-    )
+    classes = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck")
 
     # Define the test dataloader.
     testloader = torch.utils.data.DataLoader(
@@ -288,11 +263,7 @@ def main(args):
     #   3) DeepSpeed optimizer.
     ds_config = get_ds_config(args)
     model_engine, _, trainloader, __ = deepspeed.initialize(
-        args=args,
-        model=net,
-        model_parameters=parameters,
-        training_data=trainset,
-        config=ds_config,
+        args=args, model=net, model_parameters=parameters, training_data=trainset, config=ds_config
     )
 
     # Get the local device name (str) and local rank (int).
@@ -351,9 +322,7 @@ def main(args):
                 args.log_interval - 1
             ):  # Print every log_interval mini-batches.
                 avg_loss = running_loss / args.log_interval
-                print(
-                    f"[{epoch + 1 : d}, {i + 1 : 5d}] loss: {avg_loss : .3f}"
-                )
+                print(f"[{epoch + 1 : d}, {i + 1 : 5d}] loss: {avg_loss : .3f}")
                 running_loss = 0.0
     print("Finished Training")
 

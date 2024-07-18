@@ -185,11 +185,6 @@ def linear_forward_backward_and_step(
     out.sum().backward()
     optimizer.step()
 
-[888.7,893.2]
-[902.0,890.8,892.6]
-[1079.3,1069.3,1037.7]
-[1904.0,1872.1,1937.7]
-[2128.5,2729.3,2122.9]
 
 def benchmark_speed_and_peak_memory_of_fwd_bwd(
     lightning_rpu_config: RPUConfig, aihwkit_rpu_config: AIHWKITRPUConfig
@@ -393,7 +388,9 @@ def benchmark_triton_implementation():
         print(f"{provider}: Linear layer shape {n_rows} x {n_cols} time {time_ms}")
         return time_ms, max_ms, min_ms
 
-    layer_benchmark.run(print_data=True, save_path="debug/linear_performance_fwd_bwd_torch_vs_triton")
+    layer_benchmark.run(
+        print_data=True, save_path="debug/linear_performance_fwd_bwd_torch_vs_triton"
+    )
 
 
 if __name__ == "__main__":

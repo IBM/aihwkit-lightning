@@ -296,13 +296,17 @@ class AnalogConv2d(_AnalogConvNd):
 
         im_shape = x_input.shape
         assert isinstance(self.padding, tuple), "Padding must be a tuple"
-        x_input_ = unfold(
-            x_input,
-            kernel_size=self.kernel_size,
-            dilation=self.dilation,
-            padding=self.padding,
-            stride=self.stride,
-        ).transpose(-1, -2).contiguous()
+        x_input_ = (
+            unfold(
+                x_input,
+                kernel_size=self.kernel_size,
+                dilation=self.dilation,
+                padding=self.padding,
+                stride=self.stride,
+            )
+            .transpose(-1, -2)
+            .contiguous()
+        )
 
         modified_weights = modified_weights.view(self.out_channels, -1)
         triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
