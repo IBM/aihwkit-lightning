@@ -1,4 +1,4 @@
-# Training of a simple conv-net using DeepSpeed
+# Training of a simple CNN using DeepSpeed
 This example shows the code changes you have to make when using AIHWKIT Lightning with DeepSpeed.
 The network used here is a very basic two-layer CNN that doesn't achieve good accuracy. This
 is not a guide on HW-aware training, but more of an example code showing how you can
@@ -20,11 +20,11 @@ path/to/conda/environment/<env-name>/bin/deepspeed
 ```
 we commented out some requirements that were not really necessary.
 ```python
-#!/gpfs/u/home/ANFM/ANFMbchl/scratch/miniconda3/envs/torch-nightly/bin/python
+#!.../miniconda3/envs/torch-nightly/bin/python
 # EASY-INSTALL-DEV-SCRIPT: 'deepspeed==0.14.3+488a823','deepspeed'
 # __requires__ = 'deepspeed==0.14.3+488a823'
 __import__('pkg_resources')
-__file__ = '/gpfs/u/scratch/ANFM/ANFMbchl/DeepSpeed/bin/deepspeed'
+__file__ = '.../DeepSpeed/bin/deepspeed'
 with open(__file__) as f:
     exec(compile(f.read(), __file__, 'exec'))
 ```
