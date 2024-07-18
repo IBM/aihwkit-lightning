@@ -139,6 +139,7 @@ def gen_rpu(ir_enable: bool, weight_noise_enable: bool, clip_enable: bool, out_n
         rpu_config.forward.out_noise = 0.02 if out_noise_enable else 0.0
         rpu_config.pre_post.input_range.enable = ir_enable
         rpu_config.pre_post.input_range.learn_input_range = True
+        rpu_config.pre_post.input_range.init_from_data = 0
         rpu_config.clip.sigma = 2.0
         rpu_config.modifier.std_dev = 0.01
 
@@ -184,6 +185,11 @@ def linear_forward_backward_and_step(
     out.sum().backward()
     optimizer.step()
 
+[888.7,893.2]
+[902.0,890.8,892.6]
+[1079.3,1069.3,1037.7]
+[1904.0,1872.1,1937.7]
+[2128.5,2729.3,2122.9]
 
 def benchmark_speed_and_peak_memory_of_fwd_bwd(
     lightning_rpu_config: RPUConfig, aihwkit_rpu_config: AIHWKITRPUConfig
@@ -326,13 +332,11 @@ def benchmark_triton_implementation():
     """Test the speed of the triton implementation compared to AIHWKIT."""
     assert TRITON_AVAIL, "Triton is not available"
 
-    def bench(layer: AnalogLinear, inp: Tensor, use_triton: bool):
+    def bench(layer: AnalogLinear, inp: Tensor):
         """Pass the inputs through the layer"""
-        if use_triton:
-            os.environ["AIHWKIT_USE_TRITON"] = "1"
-        layer(inp)
-        if use_triton:
-            del os.environ["AIHWKIT_USE_TRITON"]
+        out = layer(inp)
+        loss = out.mean()
+        loss.backward()
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
@@ -360,7 +364,7 @@ def benchmark_triton_implementation():
             Tuple[float]: Median, min, max of the runtimes in ms
         """
         quantiles = [0.5, 0.2, 0.8]
-        bsz = 128
+        bsz = 1024
         dtype = float16
         device = torch_device("cuda" if torch_cuda.is_available() else "cpu")
         assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
@@ -377,14 +381,19 @@ def benchmark_triton_implementation():
             device=device,
             dtype=dtype,
         )
-        inp = randn(bsz, n_rows, device=device, dtype=dtype)
+        inp = randn(bsz, n_rows, device=device, dtype=dtype, requires_grad=True)
+        use_triton = provider == "triton"
+        if use_triton:
+            os.environ["AIHWKIT_USE_TRITON"] = "1"
         time_ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: bench(layer, inp, use_triton=provider == "triton"), quantiles=quantiles
+            lambda: bench(layer, inp), quantiles=quantiles
         )
+        if use_triton:
+            del os.environ["AIHWKIT_USE_TRITON"]
         print(f"{provider}: Linear layer shape {n_rows} x {n_cols} time {time_ms}")
         return time_ms, max_ms, min_ms
 
-    layer_benchmark.run(print_data=True, save_path="debug/linear_performance_fwd_torch_vs_triton")
+    layer_benchmark.run(print_data=True, save_path="debug/linear_performance_fwd_bwd_torch_vs_triton")
 
 
 if __name__ == "__main__":
