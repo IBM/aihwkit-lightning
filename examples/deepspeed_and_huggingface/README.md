@@ -1,8 +1,8 @@
 # Huggingface Accelerate
 This part of the tutorial only uses Huggingface accelerate in a DDP setting. The file `launch_accelerate.sh` can be used to execute the `train.py` script.
 
-For that, just go to this folder and execute `bash launch_accelerate.sh` if you're already on a node that has 8 GPUs. You can also package this into a slurm
-script. For that, checkout `slurm.sh`. Of course, you need to change the command in `srun bash -c ...` and remove the environment variables that configure
+Just go to this folder and execute `bash launch_accelerate.sh` if you're already on a node that has 8 GPUs. You can also package this into a slurm
+script. For that, checkout `slurm.sh`. You would need to change the command in `srun bash -c ...` and remove the environment variables that configure
 multi-node related settings such as `MASTER_PORT`.
 
 Please note that the goal of this tutorial is to show how to integrate AIHWKIT-Lightning with Huggingface Accelerate. The purpose is not to show
