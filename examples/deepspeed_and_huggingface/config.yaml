@@ -19,7 +19,6 @@ training_args:
   evaluation_strategy: steps
   fp: false  # use analog model
   gradient_accumulation_steps: 4
-  gradient_checkpointing: true
   greater_is_better: false
   load_best_model_at_end: true
   logging_steps: 31

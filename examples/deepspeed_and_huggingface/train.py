@@ -10,7 +10,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Example on how to use AIHWKIT-Lightning in multi-node training setting."""
+"""Example on how to use AIHWKIT-Lightning in single or multi-node training setting."""
 
 
 import os
@@ -22,12 +22,14 @@ import transformers
 import accelerate.logging
 
 import torch
+from torch.optim import AdamW
 
-from accelerate import Accelerator, InitProcessGroupKwargs
+from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs
 from accelerate.utils import set_seed
 import datasets
 from datasets import load_dataset
 from transformers import (
+    Trainer,
     BertForMaskedLM,
     AutoTokenizer,
     TrainingArguments,
@@ -37,6 +39,7 @@ from transformers.utils.logging import enable_default_handler, enable_explicit_f
 
 from utils import CustomTrainer, get_args, create_rpu_config
 from aihwkit_lightning.nn.conversion import convert_to_analog
+from aihwkit_lightning.optim import AnalogOptimizer
 
 
 IS_CUDA = torch.cuda.is_available()
@@ -62,8 +65,11 @@ def main():
     # Tell the Accelerator object to log with wandb
     # we specify 1801 because when 1800 is used it is overriden.
     # This was a bug in accelerate
+    use_deepspeed = os.environ.get("ACCELERATE_USE_DEEPSPEED", "false") == "true"
+
     kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=1801))
-    accelerator = Accelerator(log_with="wandb", kwargs_handlers=[kwargs])
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    accelerator = Accelerator(log_with="wandb", kwargs_handlers=[kwargs, ddp_kwargs])
     accelerator.init_trackers(
         project_name="AIHWKIT Lightning", init_kwargs={"wandb": {"name": args.run_name}}
     )
@@ -124,8 +130,6 @@ def main():
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        gradient_checkpointing=args.gradient_checkpointing,
-        gradient_checkpointing_kwargs={"use_reentrant": True},
         learning_rate=lr,
         lr_scheduler_type=args.lr_scheduler_type,
         adam_beta1=args.adam_beta1,
@@ -151,7 +155,7 @@ def main():
         fp16=IS_CUDA,
         fp16_full_eval=IS_CUDA,
         torch_compile=False,
-        deepspeed=args.ds_config_path,
+        deepspeed=args.ds_config_path if use_deepspeed else None,
     )
 
     # define trainer
@@ -159,13 +163,29 @@ def main():
         tokenizer=tokenizer, mlm=True, mlm_probability=0.15
     )
 
-    trainer = CustomTrainer(
+    trainer_cls = CustomTrainer if use_deepspeed else Trainer
+    # DeepSpeed uses it's own optimized optimizers
+    optimizers = (
+        None
+        if use_deepspeed
+        else (
+            (
+                AdamW(model.parameters(), lr=lr)
+                if args.fp
+                else AnalogOptimizer(AdamW, model.analog_layers(), model.parameters(), lr=lr)
+            ),
+            None,
+        )
+    )
+
+    trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
         tokenizer=tokenizer,
         data_collator=lm_data_collator,
+        optimizers=optimizers,
     )
 
     # train the model and save it

@@ -69,7 +69,7 @@ def add_argument():
 
     # For ZeRO Optimization.
     parser.add_argument(
-        "--stage", default=0, type=int, choices=[0, 1, 2, 3], help="Datatype used for training"
+        "--stage", default=1, type=int, choices=[0, 1, 2, 3], help="Datatype used for training"
     )
 
     # Include DeepSpeed configuration arguments.

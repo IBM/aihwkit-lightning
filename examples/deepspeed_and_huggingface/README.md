@@ -1,7 +1,17 @@
+# Huggingface Accelerate
+This part of the tutorial only uses Huggingface accelerate in a DDP setting. The file `launch_accelerate.sh` can be used to execute the `train.py` script.
+
+For that, just go to this folder and execute `bash launch_accelerate.sh` if you're already on a node that has 8 GPUs. You can also package this into a slurm
+script. For that, checkout `slurm.sh`. Of course, you need to change the command in `srun bash -c ...` and remove the environment variables that configure
+multi-node related settings such as `MASTER_PORT`.
+
+Please note that the goal of this tutorial is to show how to integrate AIHWKIT-Lightning with Huggingface Accelerate. The purpose is not to show
+how to train a language model.
+
 # SLURM + DeepSpeed + Huggingface Accelerate
 Training on larger batch sizes significantly reduces the training time of LLMs. When the point is reached where the peak memory of one training iteration exceeds the DRAM capacity of a single GPU, mulit-GPU training is employed. Standard clusters typically comprise of many nodes. Each node typically has 8 GPUs. This tutorial shows how you can train an Analog LLM in a multi-node setup using SLURM, AIHWKIT Lightning, DeepSpeed, and Huggingface Accelerate on 2 nodes, each with 8 GPUs.
 
-This tutorial will assume that you are in a very memory-limited setup. We therefore use gradient + optimizer state sharding (DeepSpeed ZeRO-2), optimizer state offloading to CPU, gradient/activation checkpointing, and FP16.
+This tutorial will assume that you are in a very memory-limited setup. We therefore use gradient + optimizer state sharding (DeepSpeed ZeRO-2), optimizer state offloading to CPU, and FP16.
 The model we use, however, is just a small Bert model, so you don't really need this. This is just to show you the possibilities of DeepSpeed and how well it integrates with AIHWKIT Lightning.
 
 ## Prerequisites
@@ -45,6 +55,8 @@ ds_config_path: ~/scratch/aihwkit-lightning/examples/deepspeed_and_huggingface/d
     --> /path/to/aihwkit-lightning/examples/deepspeed_and_huggingface/ds_config.json
 ```
 
+When everything is configured, you can start the training using `sbatch slurm.sh`. This will submit the job.
+
 ## Explanations
 ### CustomTrainer
 As can be seen from `utils.py`, we define our own `CustomTrainer` that overwrites the `training_step` function.
@@ -78,9 +90,6 @@ ZeRO optimizer state. We use stage 2, which means that we shard the gradients an
 }
 ```
 
-In the `TrainingArguments` in `train.py`, you can also see that we specify `gradient_accumulation_steps=args.gradient_accumulation_steps`. In `config.yaml`, this is specified as `true`,
-so we do gradient checkpointing.
-
 
 ### RPU-Config
 The part in the `config.yaml` dictating the `RPUConfig` used for the HW-aware training is this:
@@ -108,6 +117,54 @@ rpu_config:
 ```
 
 ## Changes to DeepSpeed (you might not need to do them)
+In `DeepSpeed/deepspeed/runtime/zero/stage_1_and_2.py`, find the section
+```python
+# Use different parallel to do all_to_all_reduce related things
+# padding on each partition for alignment purposes
+self.groups_padding = []
+```
+and add below:
+```python
+self.groups_is_ir_param = [[] for _ in range(len(self.optimizer.param_groups))]
+```
+Then, still in the `__init__` of the Zero optimizer, find
+```python
+# free temp CPU params
+for param in self.bit16_groups[i]:
+    del param.cpu_data
+```
+and below add
+```python
+is_ir_param = torch.zeros_like(flattened_buffer)
+offset = 0
+for p_tensor, name in zip(self.round_robin_bit16_meta[i], self.param_names.values()):
+    if "input_range" in name:
+        is_ir_param[offset] = 1.0
+    offset += p_tensor.numel()
+```
+Further down, find `self.parallel_partitioned_bit16_groups.append(data_parallel_partitions)`. Below, add
+```python
+partitions = self.get_data_parallel_partitions(is_ir_param, i)
+for part in partitions:
+    self.groups_is_ir_param[i].append(torch.arange(part.numel(), device=get_accelerator().current_device_name())[part == 1.0])
+del is_ir_param
+del partitions
+```
+Now, in the `step` function, find the line `fp32_partition = self.single_partition_of_fp32_groups[i]`. Note that this appears in both,
+the `if self.cpu_offload:` clause and the `else` clause. Do the following in both clauses.
+
+Before the following block
+```python
+bit16_partitions[partition_id].data.copy_(
+    fp32_partition.to(get_accelerator().current_device_name()).data)
+```
+insert
+```python
+ir_indices = self.groups_is_ir_param[i][partition_id]
+fp32_partition.data.index_put_((ir_indices.cpu(),), bit16_partitions[partition_id][ir_indices].data.float().cpu())
+```
+
+
 In `DeepSpeed/deepspeed/ops/transformer/inference/triton/matmul_ext.py`, we changed the `put` function in `class AutotuneCacheManager:` to
 ```python
 def put(self, table):
