@@ -166,7 +166,7 @@ def main():
     trainer_cls = CustomTrainer if use_deepspeed else Trainer
     # DeepSpeed uses it's own optimized optimizers
     optimizers = (
-        None
+        (None, None)
         if use_deepspeed
         else (
             (

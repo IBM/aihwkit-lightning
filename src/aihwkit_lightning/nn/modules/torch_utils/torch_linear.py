@@ -390,28 +390,28 @@ class TorchLinear:
                 input_range_update_idx: Tensor  # type: ignore[no-redef]
                 idx = input_range_update_idx[slice_idx]
                 if idx < ir_params.init_from_data:
-                    x_min = values.min()
-                    x_max = values.max()
+                    act_x_min = values.min()
+                    act_x_max = values.max()
                     # initialization
                     if x_min[slice_idx].min() > -1.1e-5 and x_max[slice_idx].max() < 1.1e-5:
-                        x_min[slice_idx] = x_min[slice_idx] + x_min
-                        x_max[slice_idx] = x_max[slice_idx] + x_max
+                        x_min[slice_idx] = x_min[slice_idx] + act_x_min
+                        x_max[slice_idx] = x_max[slice_idx] + act_x_max
                     elif ir_params.act_range_momentum == -1:
                         x_min[slice_idx] = min(
-                            x_min[slice_idx], x_min
+                            x_min[slice_idx], act_x_min
                         )  # type: ignore[call-overload]
                         x_max[slice_idx] = max(
-                            x_max[slice_idx], x_max
+                            x_max[slice_idx], act_x_max
                         )  # type: ignore[call-overload]
                     else:
                         x_min[slice_idx] = x_min[
                             slice_idx
-                        ] * ir_params.act_range_momentum + x_min * (
+                        ] * ir_params.act_range_momentum + act_x_min * (
                             1 - ir_params.act_range_momentum
                         )
                         x_max[slice_idx] = x_max[
                             slice_idx
-                        ] * ir_params.act_range_momentum + x_max * (
+                        ] * ir_params.act_range_momentum + act_x_max * (
                             1 - ir_params.act_range_momentum
                         )
 
