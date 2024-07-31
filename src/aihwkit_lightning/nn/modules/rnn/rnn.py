@@ -14,17 +14,19 @@
 
 import warnings
 import math
+from copy import deepcopy
+import re
 
 from typing import Any, List, Optional, Tuple, Type, Callable
 from torch import Tensor, jit
-from torch.nn import Dropout, ModuleList, init, Module, Linear
+from torch.nn import Dropout, ModuleList, init, Module, Linear, LSTM
 from torch.autograd import no_grad
 
 from aihwkit_lightning.nn.modules.container import AnalogContainerBase
 from aihwkit_lightning.nn.modules.linear import AnalogLinear
 from aihwkit_lightning.nn.modules.rnn.cells import AnalogLSTMCell, AnalogGRUCell
 from aihwkit_lightning.nn.modules.rnn.layers import AnalogRNNLayer, AnalogBidirRNNLayer
-from aihwkit_lightning.simulator.parameters.base import RPUConfigBase
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from .layers import AnalogRNNLayer, AnalogBidirRNNLayer
 
 
@@ -56,10 +58,9 @@ class ModularRNN(Module):
         self.layers = self.init_stacked_analog_lstm(
             num_layers, layer, first_layer_args, other_layer_args
         )
-
+        self.num_layers = num_layers
         # Introduce a Dropout layer on the outputs of each RNN layer except
         # the last layer.
-        self.num_layers = num_layers
         if num_layers == 1 and dropout > 0:
             warnings.warn(
                 "dropout lstm adds dropout layers after all but last "
@@ -134,16 +135,14 @@ class AnalogRNN(AnalogContainerBase, Module):
         input_size: in_features to W_{ih} matrix of first layer
         hidden_size: in_features and out_features for W_{hh} matrices
         bias: whether to use a bias row on the analog tile or not
-        rpu_config: configuration for an analog resistive processing
-            unit. If not given a native torch model will be
-            constructed instead.
-        tile_module_class: Class for the analog tile module (default
-            will be specified from the ``RPUConfig``).
-        xavier: whether standard PyTorch LSTM weight
-            initialization (default) or Xavier initialization
         num_layers: number of serially connected RNN layers
         bidir: if True, becomes a bidirectional RNN
         dropout: dropout applied to output of all RNN layers except last
+        xavier: whether standard PyTorch LSTM weight
+            initialization (default) or Xavier initialization        
+        rpu_config: configuration for an analog resistive processing
+            unit. If not given a native torch model will be
+            constructed instead.
     """
 
     # pylint: disable=abstract-method, too-many-arguments
@@ -153,13 +152,16 @@ class AnalogRNN(AnalogContainerBase, Module):
         cell: Type,
         input_size: int,
         hidden_size: int,
-        bias: bool = True,
-        rpu_config: Optional[RPUConfigBase] = None,
-        tile_module_class: Optional[Type] = None,
-        xavier: bool = False,
         num_layers: int = 1,
-        bidir: bool = False,
+        bias: bool = True,
+        batch_first: bool = False,
         dropout: float = 0.0,
+        bidir: bool = False,
+        proj_size: int = 0,
+        xavier: bool = False,
+        device=None,
+        dtype=None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
         super().__init__()
 
@@ -169,24 +171,39 @@ class AnalogRNN(AnalogContainerBase, Module):
         else:
             layer = AnalogRNNLayer
             num_dirs = 1
-
+        
+        if batch_first == True:
+            warnings.warn("batch_first is supported for AnalogRNN, but will just permute "
+                          "the input and output. Use batch_first = False for optimal performance"
+            )
+        # TODO: Implement proj_size > 0
+        if proj_size != 0:
+            raise RuntimeError("proj_size != 0 not supported for AnalogRNN")
+        self.proj_size = 0
+        
         self.rnn = ModularRNN(
             num_layers,
             layer,
             dropout,
-            first_layer_args=[cell, input_size, hidden_size, bias, rpu_config, tile_module_class],
+            first_layer_args=[cell, input_size, hidden_size, bias, device, dtype, rpu_config],
             other_layer_args=[
                 cell,
                 num_dirs * hidden_size,
                 hidden_size,
                 bias,
+                device, 
+                dtype,
                 rpu_config,
-                tile_module_class,
             ],
         )
+        self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.batch_first = batch_first
+        self.bidirectional = bidir
         self.reset_parameters(xavier)
+        self._register_load_state_dict_pre_hook(self.update_state_dict)
+        self._register_state_dict_hook(self.return_pytorch_state_dict)
 
     @no_grad()
     def init_layers(
@@ -216,9 +233,9 @@ class AnalogRNN(AnalogContainerBase, Module):
 
         for module in self.modules():
             if isinstance(module, AnalogLinear):
-                weight, bias = module.get_weights()
+                weight, bias = module.get_weights_and_biases()
                 init_weight_and_bias(weight, bias)
-                module.set_weights(weight, bias)
+                module.set_weights_and_biases(weight, bias)
             elif isinstance(module, Linear):
                 # init torch layers if any
                 init_weight_and_bias(module.weight, module.bias)
@@ -261,31 +278,121 @@ class AnalogRNN(AnalogContainerBase, Module):
             outputs and states
         """
 
+        if input.dim() not in (2, 3):
+            raise ValueError(f"RNN: Expected input to be 2D or 3D, got {input.dim()}D tensor instead")
+        batch_dim = 0 if self.batch_first else 1
+        if states is not None and self.bidirectional:
+            flattened_states = states if not self.bidirectional else [b for a in states for b in a]
+        if states is not None and len(states) != self.num_layers:
+            raise RuntimeError(
+                f"Expecting {self.num_layers} states, but received {len(states)}")
+            
+        if not input.dim() == 3:
+            input = input.unsqueeze(batch_dim)
+            if states is not None:
+                for state in flattened_states:
+                    for t_name in ["hx","cx"]:
+                        d = getattr(state, t_name).dim()
+                        if d != 1:
+                            raise RuntimeError(
+                                f"For unbatched 2-D input, {t_name} should be 1-D but got {d}-D tensor")
+        else:
+            if states is not None:
+                for state in flattened_states:
+                    for t_name in ["hx","cx"]:
+                        d = getattr(state, t_name).dim()
+                        if d != 2:
+                            raise RuntimeError(
+                                f"For batched 3-D input, {t_name} should be 2-D but got {d}-D tensor")
+                        
+        # TODO: implement batch_first.
+        if self.batch_first:
+            input = input.permute(1,0,2)
+        max_batch_size = input.size(1)
         if states is None:
-            # TODO: batch_first.
-            states = self.get_zero_state(input.shape[1])
+            states = self.get_zero_state(max_batch_size)
+            flattened_states = states if not self.bidirectional else [b for a in states for b in a]
+        for state in flattened_states:
+                self.check_forward_args(input, state, max_batch_size)
 
         return self.rnn(input, states)
 
+    def check_input(self, input: Tensor, batch_size: int) -> None:
+        if self.input_size != input.size(-1):
+            raise RuntimeError(
+                f'input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}')
+
+
+    def check_hidden_size(self, hx: Tensor, expected_hidden_size: Tuple[int, int, int],
+                          msg: str = 'Expected hidden size {}, got {}') -> None:
+        if hx.size() != expected_hidden_size:
+            raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
+
+    def check_forward_args(self, input: Tensor, hidden: List, batch_size: int):
+        self.check_input(input, batch_size)
+        self.check_hidden_size(hidden.hx, (batch_size, self.hidden_size))
+        self.check_hidden_size(hidden.cx, (batch_size, self.hidden_size))
+        
+    def update_state_dict(module, state_dict, *args, **kwargs):
+        if(not any(["h_l" in a.rsplit(".",1)[1] for a in state_dict.keys()])):
+            return
+        bidir = hasattr(module.rnn.layers[0], "directions")
+        old_state_dict = deepcopy(state_dict)
+        for key in old_state_dict.keys():
+            stem, suffix = key.rsplit(".",1)
+            layer = re.search("h_l(\d+)", key).groups()[0]
+            i_h = re.search("(hh|ih)", key).groups()[0]
+            weight_bias = re.search("((weight|bias))", key).groups()[0]
+            direction = 1 if "_reverse" in suffix else 0
+            b_dir = f".directions.{direction}" if bidir else ""
+            new_key = f"{stem}.rnn.layers.{layer}{b_dir}.cell.weight_{i_h}.{weight_bias}"
+            state_dict[new_key] = state_dict.pop(key)
+            
+    def return_pytorch_state_dict(self, module, state_dict, prefix, local_metadata):
+        keys = [key for key in state_dict.keys()  if prefix in key]
+        bidir = any(["directions" in key for key in keys])
+        for key in keys:
+            suffix = key.replace(f"{prefix}","")
+            if bidir:
+                _,_,layer,_,dir,_,i_h,weight_bias = suffix.split(".")
+            else:
+                _,_,layer,_,i_h,weight_bias = suffix.split(".")
+                dir = '0'
+            i_h = i_h[-2:]
+            reverse = "_reverse" if dir == "1" else ""
+            pytorch_suffix = f"{prefix}{weight_bias}_{i_h}_l{layer}{reverse}"
+            state_dict[pytorch_suffix] = state_dict.pop(key)
+                
+                
 
     @classmethod
     def from_digital(
             cls,
-            module,
-            rpu_config: Optional[RPUConfigBase] = None,
+            module: LSTM,
+            rpu_config: Optional[TorchInferenceRPUConfig] = None,
             realistic_read_write: bool = False,
     ) -> 'AnalogRNN':
         analog_module = AnalogRNN(AnalogLSTMCell,
                                   module.input_size,
                                   module.hidden_size,
+                                  module.num_layers,
                                   module.bias is not None,
-                                  rpu_config,
+                                  module.batch_first,
+                                  module.dropout,
+                                  module.bidirectional,
+                                  module.proj_size,
                                   realistic_read_write,
-                                  num_layers = module.num_layers,
-                                  bidir = module.bidirectional,
-                                  dropout = module.dropout
+                                  module.weight_hh_l0.device,
+                                  module.weight_hh_l0.dtype,
+                                  rpu_config,
                                   )
         for i, layer in enumerate(analog_module.rnn.layers):
-            layer.cell.weight_ih.set_weights(module.all_weights[i][0],module.all_weights[i][2])
-            layer.cell.weight_hh.set_weights(module.all_weights[i][1],module.all_weights[i][3])
+            if analog_module.bidirectional == True:
+                layer.directions[0].cell.weight_ih.set_weights_and_biases(getattr(module,f"weight_ih_l{i}"),getattr(module,f"bias_ih_l{i}"))
+                layer.directions[0].cell.weight_hh.set_weights_and_biases(getattr(module,f"weight_hh_l{i}"),getattr(module,f"bias_hh_l{i}"))
+                layer.directions[1].cell.weight_ih.set_weights_and_biases(getattr(module,f"weight_ih_l{i}_reverse"),getattr(module,f"bias_ih_l{i}_reverse"))
+                layer.directions[1].cell.weight_hh.set_weights_and_biases(getattr(module,f"weight_hh_l{i}_reverse"),getattr(module,f"bias_hh_l{i}_reverse"))
+            else:
+                layer.cell.weight_ih.set_weights_and_biases(getattr(module,f"weight_ih_l{i}"),getattr(module,f"bias_ih_l{i}"))
+                layer.cell.weight_hh.set_weights_and_biases(getattr(module,f"weight_hh_l{i}"),getattr(module,f"bias_hh_l{i}"))
         return analog_module

@@ -20,8 +20,7 @@ from torch.nn import Linear, Module, LSTM
 
 from aihwkit_lightning.nn.modules.linear import AnalogLinear
 
-from aihwkit_lightning.simulator.configs.configs import InferenceRPUConfig
-from aihwkit_lightning.simulator.parameters.base import RPUConfigBase
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 
 
 LSTMState = namedtuple("LSTMState", ["hx", "cx"])
@@ -31,13 +30,12 @@ def _get_linear(
     in_size: int,
     out_size: int,
     bias: bool,
-    rpu_config: Optional[RPUConfigBase],
-    tile_module_class: Optional[Type],
+    device=None,
+    dtype=None,
+    rpu_config: Optional[TorchInferenceRPUConfig] = None,
 ) -> Module:
-    """Return a linear or analog linear module given the parameters."""
-    if rpu_config is not None:
-        return AnalogLinear(in_size, out_size, bias, rpu_config, tile_module_class)
-    return Linear(in_size, out_size, bias)
+    """Return an analog linear module given the parameters."""
+    return AnalogLinear(in_size, out_size, bias, device, dtype, rpu_config)
 
 
 class AnalogVanillaRNNCell(Module):
@@ -50,8 +48,6 @@ class AnalogVanillaRNNCell(Module):
         rpu_config: configuration for an analog resistive processing
             unit. If not given a native torch model will be
             constructed instead.
-        tile_module_class: Class for the analog tile module (default
-            will be specified from the ``RPUConfig``).
 
     """
 
@@ -61,15 +57,19 @@ class AnalogVanillaRNNCell(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        rpu_config: Optional[RPUConfigBase] = None,
-        tile_module_class: Optional[Type] = None,
+        device=None, 
+        dtype=None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
         super().__init__()
 
+        if rpu_config is None:
+            raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
+        
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.weight_ih = _get_linear(input_size, hidden_size, bias, rpu_config, tile_module_class)
-        self.weight_hh = _get_linear(hidden_size, hidden_size, bias, rpu_config, tile_module_class)
+        self.weight_ih = _get_linear(input_size, hidden_size, bias, device, dtype, rpu_config)
+        self.weight_hh = _get_linear(hidden_size, hidden_size, bias, device, dtype, rpu_config)
 
     def get_zero_state(self, batch_size: int) -> Tensor:
         """Returns a zeroed state.
@@ -112,8 +112,6 @@ class AnalogLSTMCell(Module):
         rpu_config: configuration for an analog resistive processing
             unit. If not given a native torch model will be
             constructed instead.
-        tile_module_class: Class for the analog tile module (default
-            will be specified from the ``RPUConfig``).
     """
 
     # pylint: disable=abstract-method
@@ -123,19 +121,21 @@ class AnalogLSTMCell(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        rpu_config: Optional[RPUConfigBase] = None,
-        tile_module_class: Optional[Type] = None,
+        device=None, 
+        dtype=None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None
     ):
         super().__init__()
+
+        if rpu_config is None:
+            raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
 
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.weight_ih = _get_linear(
-            input_size, 4 * hidden_size, bias, rpu_config, tile_module_class
-        )
+            input_size, 4 * hidden_size, bias, device, dtype, rpu_config)
         self.weight_hh = _get_linear(
-            hidden_size, 4 * hidden_size, bias, rpu_config, tile_module_class
-        )
+            hidden_size, 4 * hidden_size, bias, device, dtype, rpu_config)
 
     def get_zero_state(self, batch_size: int) -> Tensor:
         """Returns a zeroed state.
@@ -182,14 +182,14 @@ class AnalogLSTMCell(Module):
     def from_digital(
             cls,
             module: LSTM,
-            rpu_config: Optional[RPUConfigBase] = None,
             realistic_read_write: bool = False,
+            rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ) -> 'AnalogLSTMCell':
         analog_module = cls(module.input_size,
                             module.hidden_size,
                             module.bias is not None,
-                            rpu_config,
                             realistic_read_write,
+                            rpu_config,
                             )
 
         analog_module.weight_ih.set_weights(module.weight_ih_l0,module.bias_ih_l0)
@@ -206,8 +206,6 @@ class AnalogLSTMCellCombinedWeight(Module):
         rpu_config: configuration for an analog resistive processing
             unit. If not given a native torch model will be
             constructed instead.
-        tile_module_class: Class for the analog tile module (default
-            will be specified from the ``RPUConfig``).
     """
 
     # pylint: disable=abstract-method
@@ -217,16 +215,17 @@ class AnalogLSTMCellCombinedWeight(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        rpu_config: Optional[RPUConfigBase] = None,
-        tile_module_class: Optional[Type] = None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None
     ):
         super().__init__()
 
+        if rpu_config is None:
+            raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
+        
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.weight = _get_linear(
-            input_size + hidden_size, 4 * hidden_size, bias, rpu_config, tile_module_class
-        )
+            input_size + hidden_size, 4 * hidden_size, bias, rpu_config)
 
     def get_zero_state(self, batch_size: int) -> Tensor:
         """Returns a zeroed state.
@@ -239,8 +238,8 @@ class AnalogLSTMCellCombinedWeight(Module):
         """
         param = next(self.parameters())
         return LSTMState(
-            zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype),
-            zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype),
+            zeros([1, batch_size, self.hidden_size], device=param.device, dtype=param.dtype),
+            zeros([1, batch_size, self.hidden_size], self.hidden_size, device=param.device, dtype=param.dtype),
         )
 
     def forward(
@@ -282,8 +281,6 @@ class AnalogGRUCell(Module):
         rpu_config: configuration for an analog resistive processing
             unit. If not given a native torch model will be
             constructed instead.
-        tile_module_class: Class for the analog tile module (default
-            will be specified from the ``RPUConfig``).
     """
 
     # pylint: disable=abstract-method
@@ -293,22 +290,22 @@ class AnalogGRUCell(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        rpu_config: Optional[RPUConfigBase] = None,
-        tile_module_class: Optional[Type] = None,
+        device=None, 
+        dtype=None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
         super().__init__()
 
-        # Default to InferenceRPUConfig
-        if not rpu_config:
-            rpu_config = InferenceRPUConfig()
+        if rpu_config is None:
+            raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
 
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.weight_ih = AnalogLinear(
-            input_size, 3 * hidden_size, bias, rpu_config, tile_module_class
+            input_size, 3 * hidden_size, bias, device, dtype, rpu_config
         )
         self.weight_hh = AnalogLinear(
-            hidden_size, 3 * hidden_size, bias, rpu_config, tile_module_class
+            hidden_size, 3 * hidden_size, bias, device, dtype, rpu_config
         )
 
     def get_zero_state(self, batch_size: int) -> Tensor:
