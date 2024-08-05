@@ -20,7 +20,7 @@ from aihwkit_lightning.nn.modules.conv import AnalogConv1d, AnalogConv2d
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
 from aihwkit_lightning.nn.modules.rnn.rnn import AnalogRNN
-from aihwkit.nn.modules.rnn.cells import (
+from aihwkit_lightning.nn.modules.rnn.cells import (
     AnalogGRUCell,
     AnalogLSTMCell,
     AnalogVanillaRNNCell,
