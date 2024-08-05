@@ -16,7 +16,7 @@
 
 from aihwkit_lightning.nn.modules.container import AnalogSequential, AnalogWrapper
 from aihwkit_lightning.nn.modules.linear import AnalogLinear
-from aihwkit_lightning.nn.modules.conv import AnalogConv2d
+from aihwkit_lightning.nn.modules.conv import AnalogConv1d, AnalogConv2d
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
 from aihwkit_lightning.nn.modules.rnn.rnn import AnalogRNN

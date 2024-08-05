@@ -126,7 +126,8 @@ class ModularRNN(Module):
             output_states += [out_state]
 
         return output, output_states
-    
+
+
 class AnalogRNN(AnalogContainerBase, Module):
     """Modular RNN that uses analog tiles.
 
@@ -139,7 +140,7 @@ class AnalogRNN(AnalogContainerBase, Module):
         bidir: if True, becomes a bidirectional RNN
         dropout: dropout applied to output of all RNN layers except last
         xavier: whether standard PyTorch LSTM weight
-            initialization (default) or Xavier initialization        
+            initialization (default) or Xavier initialization
         rpu_config: configuration for an analog resistive processing
             unit. If not given a native torch model will be
             constructed instead.
@@ -171,16 +172,14 @@ class AnalogRNN(AnalogContainerBase, Module):
         else:
             layer = AnalogRNNLayer
             num_dirs = 1
-        
+        # TODO: Implement batch_first
         if batch_first == True:
-            warnings.warn("batch_first is supported for AnalogRNN, but will just permute "
-                          "the input and output. Use batch_first = False for optimal performance"
-            )
+            raise RuntimeError("batch_first is not supported for AnalogRNN")
         # TODO: Implement proj_size > 0
         if proj_size != 0:
             raise RuntimeError("proj_size != 0 not supported for AnalogRNN")
         self.proj_size = 0
-        
+
         self.rnn = ModularRNN(
             num_layers,
             layer,
@@ -191,7 +190,7 @@ class AnalogRNN(AnalogContainerBase, Module):
                 num_dirs * hidden_size,
                 hidden_size,
                 bias,
-                device, 
+                device,
                 dtype,
                 rpu_config,
             ],
@@ -279,67 +278,72 @@ class AnalogRNN(AnalogContainerBase, Module):
         """
 
         if input.dim() not in (2, 3):
-            raise ValueError(f"RNN: Expected input to be 2D or 3D, got {input.dim()}D tensor instead")
+            raise ValueError(
+                f"RNN: Expected input to be 2D or 3D, got {input.dim()}D tensor instead"
+            )
         batch_dim = 0 if self.batch_first else 1
         if states is not None and self.bidirectional:
             flattened_states = states if not self.bidirectional else [b for a in states for b in a]
         if states is not None and len(states) != self.num_layers:
-            raise RuntimeError(
-                f"Expecting {self.num_layers} states, but received {len(states)}")
-            
+            raise RuntimeError(f"Expecting {self.num_layers} states, but received {len(states)}")
+
         if not input.dim() == 3:
             input = input.unsqueeze(batch_dim)
             if states is not None:
                 for state in flattened_states:
-                    for t_name in ["hx","cx"]:
+                    for t_name in ["hx", "cx"]:
                         d = getattr(state, t_name).dim()
                         if d != 1:
                             raise RuntimeError(
-                                f"For unbatched 2-D input, {t_name} should be 1-D but got {d}-D tensor")
+                                f"For unbatched 2-D input, {t_name} should be 1-D but got {d}-D tensor"
+                            )
         else:
             if states is not None:
                 for state in flattened_states:
-                    for t_name in ["hx","cx"]:
+                    for t_name in ["hx", "cx"]:
                         d = getattr(state, t_name).dim()
                         if d != 2:
                             raise RuntimeError(
-                                f"For batched 3-D input, {t_name} should be 2-D but got {d}-D tensor")
-                        
-        # TODO: implement batch_first.
-        if self.batch_first:
-            input = input.permute(1,0,2)
+                                f"For batched 3-D input, {t_name} should be 2-D but got {d}-D tensor"
+                            )
+
         max_batch_size = input.size(1)
         if states is None:
             states = self.get_zero_state(max_batch_size)
             flattened_states = states if not self.bidirectional else [b for a in states for b in a]
         for state in flattened_states:
-                self.check_forward_args(input, state, max_batch_size)
+            self.check_forward_args(input, state, max_batch_size)
 
         return self.rnn(input, states)
 
     def check_input(self, input: Tensor, batch_size: int) -> None:
         if self.input_size != input.size(-1):
             raise RuntimeError(
-                f'input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}')
+                f"input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}"
+            )
 
-
-    def check_hidden_size(self, hx: Tensor, expected_hidden_size: Tuple[int, int, int],
-                          msg: str = 'Expected hidden size {}, got {}') -> None:
+    def check_hidden_size(
+        self,
+        hx: Tensor,
+        expected_hidden_size: Tuple[int, int, int],
+        msg: str = "Expected hidden size {}, got {}",
+    ) -> None:
         if hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
 
     def check_forward_args(self, input: Tensor, hidden: List, batch_size: int):
         self.check_input(input, batch_size)
         self.check_hidden_size(hidden.hx, (batch_size, self.hidden_size))
-        self.check_hidden_size(hidden.cx, (batch_size, self.hidden_size))
-        
+        if hidden.cx is not None:
+            self.check_hidden_size(hidden.cx, (batch_size, self.hidden_size))
+
     def update_state_dict(module, state_dict, *args, **kwargs):
-        if(not any(["h_l" in a.rsplit(".",1)[1] for a in state_dict.keys()])):
+        if not any(["h_l" in a.rsplit(".", 1)[1] for a in state_dict.keys()]):
             return
         bidir = hasattr(module.rnn.layers[0], "directions")
         old_state_dict = deepcopy(state_dict)
         for key in old_state_dict.keys():
-            stem, suffix = key.rsplit(".",1)
+            stem, suffix = key.rsplit(".", 1)
             layer = re.search("h_l(\d+)", key).groups()[0]
             i_h = re.search("(hh|ih)", key).groups()[0]
             weight_bias = re.search("((weight|bias))", key).groups()[0]
@@ -347,52 +351,65 @@ class AnalogRNN(AnalogContainerBase, Module):
             b_dir = f".directions.{direction}" if bidir else ""
             new_key = f"{stem}.rnn.layers.{layer}{b_dir}.cell.weight_{i_h}.{weight_bias}"
             state_dict[new_key] = state_dict.pop(key)
-            
+
     def return_pytorch_state_dict(self, module, state_dict, prefix, local_metadata):
-        keys = [key for key in state_dict.keys()  if prefix in key]
+        keys = [key for key in state_dict.keys() if prefix in key]
         bidir = any(["directions" in key for key in keys])
         for key in keys:
-            suffix = key.replace(f"{prefix}","")
+            suffix = key.replace(f"{prefix}", "")
             if bidir:
-                _,_,layer,_,dir,_,i_h,weight_bias = suffix.split(".")
+                _, _, layer, _, dir, _, i_h, weight_bias = suffix.split(".")
             else:
-                _,_,layer,_,i_h,weight_bias = suffix.split(".")
-                dir = '0'
+                _, _, layer, _, i_h, weight_bias = suffix.split(".")
+                dir = "0"
             i_h = i_h[-2:]
             reverse = "_reverse" if dir == "1" else ""
             pytorch_suffix = f"{prefix}{weight_bias}_{i_h}_l{layer}{reverse}"
             state_dict[pytorch_suffix] = state_dict.pop(key)
-                
-                
 
     @classmethod
     def from_digital(
-            cls,
-            module: LSTM,
-            rpu_config: Optional[TorchInferenceRPUConfig] = None,
-            realistic_read_write: bool = False,
-    ) -> 'AnalogRNN':
-        analog_module = AnalogRNN(AnalogLSTMCell,
-                                  module.input_size,
-                                  module.hidden_size,
-                                  module.num_layers,
-                                  module.bias is not None,
-                                  module.batch_first,
-                                  module.dropout,
-                                  module.bidirectional,
-                                  module.proj_size,
-                                  realistic_read_write,
-                                  module.weight_hh_l0.device,
-                                  module.weight_hh_l0.dtype,
-                                  rpu_config,
-                                  )
+        cls,
+        module: LSTM,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
+        realistic_read_write: bool = False,
+    ) -> "AnalogRNN":
+        analog_module = AnalogRNN(
+            AnalogLSTMCell,
+            module.input_size,
+            module.hidden_size,
+            module.num_layers,
+            module.bias is not None,
+            module.batch_first,
+            module.dropout,
+            module.bidirectional,
+            module.proj_size,
+            realistic_read_write,
+            module.weight_hh_l0.device,
+            module.weight_hh_l0.dtype,
+            rpu_config,
+        )
         for i, layer in enumerate(analog_module.rnn.layers):
             if analog_module.bidirectional == True:
-                layer.directions[0].cell.weight_ih.set_weights_and_biases(getattr(module,f"weight_ih_l{i}"),getattr(module,f"bias_ih_l{i}"))
-                layer.directions[0].cell.weight_hh.set_weights_and_biases(getattr(module,f"weight_hh_l{i}"),getattr(module,f"bias_hh_l{i}"))
-                layer.directions[1].cell.weight_ih.set_weights_and_biases(getattr(module,f"weight_ih_l{i}_reverse"),getattr(module,f"bias_ih_l{i}_reverse"))
-                layer.directions[1].cell.weight_hh.set_weights_and_biases(getattr(module,f"weight_hh_l{i}_reverse"),getattr(module,f"bias_hh_l{i}_reverse"))
+                layer.directions[0].cell.weight_ih.set_weights_and_biases(
+                    getattr(module, f"weight_ih_l{i}"), getattr(module, f"bias_ih_l{i}")
+                )
+                layer.directions[0].cell.weight_hh.set_weights_and_biases(
+                    getattr(module, f"weight_hh_l{i}"), getattr(module, f"bias_hh_l{i}")
+                )
+                layer.directions[1].cell.weight_ih.set_weights_and_biases(
+                    getattr(module, f"weight_ih_l{i}_reverse"),
+                    getattr(module, f"bias_ih_l{i}_reverse"),
+                )
+                layer.directions[1].cell.weight_hh.set_weights_and_biases(
+                    getattr(module, f"weight_hh_l{i}_reverse"),
+                    getattr(module, f"bias_hh_l{i}_reverse"),
+                )
             else:
-                layer.cell.weight_ih.set_weights_and_biases(getattr(module,f"weight_ih_l{i}"),getattr(module,f"bias_ih_l{i}"))
-                layer.cell.weight_hh.set_weights_and_biases(getattr(module,f"weight_hh_l{i}"),getattr(module,f"bias_hh_l{i}"))
+                layer.cell.weight_ih.set_weights_and_biases(
+                    getattr(module, f"weight_ih_l{i}"), getattr(module, f"bias_ih_l{i}")
+                )
+                layer.cell.weight_hh.set_weights_and_biases(
+                    getattr(module, f"weight_hh_l{i}"), getattr(module, f"bias_hh_l{i}")
+                )
         return analog_module

@@ -57,7 +57,7 @@ class AnalogVanillaRNNCell(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        device=None, 
+        device=None,
         dtype=None,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
@@ -65,7 +65,7 @@ class AnalogVanillaRNNCell(Module):
 
         if rpu_config is None:
             raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
-        
+
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.weight_ih = _get_linear(input_size, hidden_size, bias, device, dtype, rpu_config)
@@ -81,7 +81,10 @@ class AnalogVanillaRNNCell(Module):
            Zeroed state tensor
         """
         param = next(self.parameters())
-        return zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype)
+        return LSTMState(
+            zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype),
+            None,  # cx unused
+        )
 
     def forward(self, input_: Tensor, state: Tensor) -> Tuple[Tensor, Tensor]:
         """Forward pass.
@@ -94,12 +97,13 @@ class AnalogVanillaRNNCell(Module):
             output and output states (which is the same here)
         """
         # pylint: disable=arguments-differ
+        h_x, _ = state
         igates = self.weight_ih(input_)
-        hgates = self.weight_hh(state)
+        hgates = self.weight_hh(h_x)
 
         out = tanh(igates + hgates)
 
-        return out, out  # output will also be hidden state
+        return out, (out, None)  # output will also be hidden state
 
 
 class AnalogLSTMCell(Module):
@@ -121,9 +125,9 @@ class AnalogLSTMCell(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        device=None, 
+        device=None,
         dtype=None,
-        rpu_config: Optional[TorchInferenceRPUConfig] = None
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
         super().__init__()
 
@@ -132,10 +136,8 @@ class AnalogLSTMCell(Module):
 
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.weight_ih = _get_linear(
-            input_size, 4 * hidden_size, bias, device, dtype, rpu_config)
-        self.weight_hh = _get_linear(
-            hidden_size, 4 * hidden_size, bias, device, dtype, rpu_config)
+        self.weight_ih = _get_linear(input_size, 4 * hidden_size, bias, device, dtype, rpu_config)
+        self.weight_hh = _get_linear(hidden_size, 4 * hidden_size, bias, device, dtype, rpu_config)
 
     def get_zero_state(self, batch_size: int) -> Tensor:
         """Returns a zeroed state.
@@ -178,23 +180,26 @@ class AnalogLSTMCell(Module):
         h_y = out_gate * tanh(c_y)
 
         return h_y, (h_y, c_y)
+
     @classmethod
     def from_digital(
-            cls,
-            module: LSTM,
-            realistic_read_write: bool = False,
-            rpu_config: Optional[TorchInferenceRPUConfig] = None,
-    ) -> 'AnalogLSTMCell':
-        analog_module = cls(module.input_size,
-                            module.hidden_size,
-                            module.bias is not None,
-                            realistic_read_write,
-                            rpu_config,
-                            )
+        cls,
+        module: LSTM,
+        realistic_read_write: bool = False,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
+    ) -> "AnalogLSTMCell":
+        analog_module = cls(
+            module.input_size,
+            module.hidden_size,
+            module.bias is not None,
+            realistic_read_write,
+            rpu_config,
+        )
 
-        analog_module.weight_ih.set_weights(module.weight_ih_l0,module.bias_ih_l0)
-        analog_module.weight_hh.set_weights(module.weight_hh_l0,module.bias_hh_l0)
+        analog_module.weight_ih.set_weights(module.weight_ih_l0, module.bias_ih_l0)
+        analog_module.weight_hh.set_weights(module.weight_hh_l0, module.bias_hh_l0)
         return analog_module
+
 
 class AnalogLSTMCellCombinedWeight(Module):
     """Analog LSTM Cell that use a combined weight for storing gates and inputs.
@@ -215,17 +220,20 @@ class AnalogLSTMCellCombinedWeight(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        rpu_config: Optional[TorchInferenceRPUConfig] = None
+        device=None,
+        dtype=None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
         super().__init__()
 
         if rpu_config is None:
             raise ValueError("rpu_config must be provided. Try TorchInferenceRPUConfig()")
-        
+
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.weight = _get_linear(
-            input_size + hidden_size, 4 * hidden_size, bias, rpu_config)
+            input_size + hidden_size, 4 * hidden_size, bias, device, dtype, rpu_config
+        )
 
     def get_zero_state(self, batch_size: int) -> Tensor:
         """Returns a zeroed state.
@@ -238,8 +246,8 @@ class AnalogLSTMCellCombinedWeight(Module):
         """
         param = next(self.parameters())
         return LSTMState(
-            zeros([1, batch_size, self.hidden_size], device=param.device, dtype=param.dtype),
-            zeros([1, batch_size, self.hidden_size], self.hidden_size, device=param.device, dtype=param.dtype),
+            zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype),
+            zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype),
         )
 
     def forward(
@@ -290,7 +298,7 @@ class AnalogGRUCell(Module):
         input_size: int,
         hidden_size: int,
         bias: bool,
-        device=None, 
+        device=None,
         dtype=None,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
@@ -301,12 +309,8 @@ class AnalogGRUCell(Module):
 
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.weight_ih = AnalogLinear(
-            input_size, 3 * hidden_size, bias, device, dtype, rpu_config
-        )
-        self.weight_hh = AnalogLinear(
-            hidden_size, 3 * hidden_size, bias, device, dtype, rpu_config
-        )
+        self.weight_ih = AnalogLinear(input_size, 3 * hidden_size, bias, device, dtype, rpu_config)
+        self.weight_hh = AnalogLinear(hidden_size, 3 * hidden_size, bias, device, dtype, rpu_config)
 
     def get_zero_state(self, batch_size: int) -> Tensor:
         """Returns a zeroed state.
@@ -318,7 +322,10 @@ class AnalogGRUCell(Module):
            Zeroed state tensor
         """
         param = next(self.parameters())
-        return zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype)
+        return LSTMState(
+            zeros(batch_size, self.hidden_size, device=param.device, dtype=param.dtype),
+            None,  # cx unused
+        )
 
     def forward(self, input_: Tensor, state: Tensor) -> Tuple[Tensor, Tensor]:
         """Forward pass.
@@ -331,15 +338,15 @@ class AnalogGRUCell(Module):
             output h_y and output states h_y (which is the same here)
         """
         # pylint: disable=arguments-differ
-
+        h_x, _ = state
         g_i = self.weight_ih(input_)
-        g_h = self.weight_hh(state)
+        g_h = self.weight_hh(h_x)
         i_r, i_i, i_n = g_i.chunk(3, 1)
         h_r, h_i, h_n = g_h.chunk(3, 1)
 
         reset_gate = sigmoid(i_r + h_r)
         input_gate = sigmoid(i_i + h_i)
         new_gate = tanh(i_n + reset_gate * h_n)
-        hidden_y = new_gate + input_gate * (state - new_gate)
+        hidden_y = new_gate + input_gate * (h_x - new_gate)
 
-        return hidden_y, hidden_y  # output will also be hidden state
+        return hidden_y, (hidden_y, None)  # output will also be hidden state
