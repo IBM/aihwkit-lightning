@@ -309,16 +309,16 @@ class AnalogConv1d(_AnalogConvNd):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple],
-        stride: Union[int, Tuple] = 1,
-        padding: Union[int, Tuple] = 0,
-        dilation: Union[int, Tuple] = 1,
+        kernel_size: Union[int, Tuple[int]],
+        stride: Union[int, Tuple[int]] = 1,
+        padding: Union[int, Tuple[int]] = 0,
+        dilation: Union[int, Tuple[int]] = 1,
         groups: int = 1,
         bias: bool = True,
         padding_mode: str = "zeros",
         device=None,
         dtype=None,
-        rpu_config: Optional["RPUConfigBase"] = None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ):
         # pylint: disable=too-many-arguments
         kernel_size = _single(kernel_size)
@@ -355,26 +355,24 @@ class AnalogConv1d(_AnalogConvNd):
         return y.squeeze(-2)
 
     @classmethod
-    def from_digital(cls, module: Conv1d, rpu_config: "RPUConfigBase") -> "AnalogConv1d":
+    def from_digital(cls, module: Conv1d, rpu_config: TorchInferenceRPUConfig) -> "AnalogConv1d":
         """Return an AnalogConv1d layer from a torch Conv1d layer.
 
         Args:
             module: The torch module to convert. All layers that are
                 defined in the ``conversion_map``.
-            rpu_config: RPU config to apply to all converted tiles.
-                Applied to all converted tiles.
-            tile_module_class: Class for the tile module (default
-                will be specified from the ``RPUConfig``).
+            rpu_config: RPU config to use.
+
         Returns:
             an AnalogConv1d layer based on the digital Conv1d ``module``.
         """
         analog_layer = cls(
             module.in_channels,
             module.out_channels,
-            module.kernel_size,
-            module.stride,
-            module.padding,
-            module.dilation,
+            module.kernel_size,  # type: ignore
+            module.stride,  # type: ignore
+            module.padding,  # type: ignore
+            module.dilation,  # type: ignore
             module.groups,
             module.bias is not None,
             module.padding_mode,
@@ -387,29 +385,25 @@ class AnalogConv1d(_AnalogConvNd):
         return analog_layer.to(device=module.weight.device, dtype=module.weight.dtype)
 
     @classmethod
-    def to_digital(cls, module: "AnalogConv1d", realistic: bool = False) -> Conv1d:
+    def to_digital(cls, module: "AnalogConv1d") -> Conv1d:
         """Return an nn.Conv1d layer from an AnalogConv1d layer.
 
         Args:
             module: The analog module to convert.
-            realistic: whehter to estimate the weights with the
-                non-ideal forward pass. If not set, analog weights are
-                (unrealistically) copies exactly
 
         Returns:
             an torch Linear layer with the same dimension and weights
             as the analog linear layer.
         """
-        weight, bias = module.get_weights(realistic=realistic)
         digital_layer = Conv1d(
             module.in_channels,
             module.out_channels,
-            module.kernel_size,
-            module.stride,
-            module.padding,
-            module.dilation,
+            module.kernel_size[1],
+            module.stride[1],
+            module.padding[1],
+            module.dilation[1],
             module.groups,
-            bias is not None,
+            module.bias is not None,
             module.padding_mode,
         )
         digital_layer.weight.data = module.weight.data.detach().clone()
@@ -418,13 +412,17 @@ class AnalogConv1d(_AnalogConvNd):
             digital_layer.bias.data = module.bias.data.detach().clone()
         return digital_layer.to(device=module.weight.device, dtype=module.weight.dtype)
 
-    def update_state_dict(module, state_dict, *args, **kwargs):
+    def update_state_dict(self, state_dict, *args, **kwargs):  # pylint: disable=unused-argument
+        """Update the state dict weight shape to cast Conv1d as AnalogConv2d"""
         for name, item in state_dict.items():
             if "weight" in name:
                 state_dict[name] = item.unsqueeze(-2)
 
     def return_pytorch_state_dict(self, module, state_dict, prefix, local_metadata):
-        for name, item in state_dict.items():
+        # pylint: disable=unused-argument
+        """Return the cast AnalogConv2d weight shape to standard 1d shape"""
+        keys = [key for key in state_dict.keys() if prefix in key]
+        for name, item in [(key, state_dict[key]) for key in keys]:
             if "weight" in name:
                 state_dict[name] = item.squeeze(-2)
 

@@ -17,14 +17,14 @@ import math
 from copy import deepcopy
 import re
 
-from typing import Any, List, Optional, Tuple, Type, Callable
+from typing import Any, List, Optional, Tuple, Type, Callable, Union
 from torch import Tensor, jit
 from torch.nn import Dropout, ModuleList, init, Module, Linear, LSTM
 from torch.autograd import no_grad
 
 from aihwkit_lightning.nn.modules.container import AnalogContainerBase
 from aihwkit_lightning.nn.modules.linear import AnalogLinear
-from aihwkit_lightning.nn.modules.rnn.cells import AnalogLSTMCell, AnalogGRUCell
+from aihwkit_lightning.nn.modules.rnn.cells import AnalogLSTMCell, LSTMState
 from aihwkit_lightning.nn.modules.rnn.layers import AnalogRNNLayer, AnalogBidirRNNLayer
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from .layers import AnalogRNNLayer, AnalogBidirRNNLayer
@@ -41,15 +41,13 @@ class ModularRNN(Module):
         other_layer_args: RNNCell type, hidden_size, hidden_size, rpu_config, etc.
     """
 
-    # pylint: disable=abstract-method
-
     # Necessary for iterating through self.layers and dropout support
     __constants__ = ["layers", "num_layers"]
 
     def __init__(
         self,
         num_layers: int,
-        layer: Type,
+        layer: Union[Type[AnalogBidirRNNLayer], Type[AnalogRNNLayer]],
         dropout: float,
         first_layer_args: Any,
         other_layer_args: Any,
@@ -71,7 +69,10 @@ class ModularRNN(Module):
 
     @staticmethod
     def init_stacked_analog_lstm(
-        num_layers: int, layer: Type, first_layer_args: Any, other_layer_args: Any
+        num_layers: int,
+        layer: Union[Type[AnalogBidirRNNLayer], Type[AnalogRNNLayer]],
+        first_layer_args: Any,
+        other_layer_args: Any,
     ) -> ModuleList:
         """Construct a list of LSTMLayers over which to iterate.
 
@@ -101,13 +102,11 @@ class ModularRNN(Module):
         """
         return [lay.get_zero_state(batch_size) for lay in self.layers]
 
-    def forward(  # pylint: disable=arguments-differ
-        self, input: Tensor, states: List  # pylint: disable=redefined-builtin
-    ) -> Tuple[Tensor, List]:
+    def forward(self, inp: Tensor, states: List) -> Tuple[Tensor, List]:
         """Forward pass.
 
         Args:
-            input: input tensor
+            inp: input tensor
             states: list of LSTM state tensors
 
         Returns:
@@ -115,7 +114,7 @@ class ModularRNN(Module):
         """
         # List[RNNState]: One state per layer.
         output_states = jit.annotate(List, [])
-        output = input
+        output = inp
 
         for i, rnn_layer in enumerate(self.layers):
             state = states[i]
@@ -135,18 +134,18 @@ class AnalogRNN(AnalogContainerBase, Module):
         cell: type of Analog RNN cell (AnalogLSTMCell/AnalogGRUCell/AnalogVanillaRNNCell)
         input_size: in_features to W_{ih} matrix of first layer
         hidden_size: in_features and out_features for W_{hh} matrices
-        bias: whether to use a bias row on the analog tile or not
         num_layers: number of serially connected RNN layers
+        bias: whether to use a bias row on the analog tile or not
+        batch_first: whether the 1st or 2nd input dimension is the batch (only second supported)
         bidir: if True, becomes a bidirectional RNN
         dropout: dropout applied to output of all RNN layers except last
+        proj_size: projection size (currently unsupported)
         xavier: whether standard PyTorch LSTM weight
             initialization (default) or Xavier initialization
         rpu_config: configuration for an analog resistive processing
             unit. If not given a native torch model will be
             constructed instead.
     """
-
-    # pylint: disable=abstract-method, too-many-arguments
 
     def __init__(
         self,
@@ -156,24 +155,26 @@ class AnalogRNN(AnalogContainerBase, Module):
         num_layers: int = 1,
         bias: bool = True,
         batch_first: bool = False,
-        dropout: float = 0.0,
         bidir: bool = False,
+        dropout: float = 0.0,
         proj_size: int = 0,
         xavier: bool = False,
         device=None,
         dtype=None,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
-    ):
+    ):  # pylint: disable=too-many-arguments, too-many-locals
         super().__init__()
 
         if bidir:
-            layer = AnalogBidirRNNLayer
+            layer = (
+                AnalogBidirRNNLayer
+            )  # type: Union[Type[AnalogBidirRNNLayer], Type[AnalogRNNLayer]]
             num_dirs = 2
         else:
             layer = AnalogRNNLayer
             num_dirs = 1
         # TODO: Implement batch_first
-        if batch_first == True:
+        if batch_first:
             raise RuntimeError("batch_first is not supported for AnalogRNN")
         # TODO: Implement proj_size > 0
         if proj_size != 0:
@@ -264,22 +265,23 @@ class AnalogRNN(AnalogContainerBase, Module):
         """
         return self.rnn.get_zero_state(batch_size)
 
-    def forward(
-        self, input: Tensor, states: Optional[List] = None  # pylint: disable=redefined-builtin
-    ) -> Tuple[Tensor, List]:
+    def forward(self, inp: Tensor, states: Optional[List] = None) -> Tuple[Tensor, List]:
         """Forward pass.
 
         Args:
-            input: input tensor
+            inp: input tensor
             states: list of LSTM state tensors
 
         Returns:
             outputs and states
-        """
 
-        if input.dim() not in (2, 3):
-            raise ValueError(
-                f"RNN: Expected input to be 2D or 3D, got {input.dim()}D tensor instead"
+        Raises:
+            RuntimeError: Input or hidden states not expected shape
+        """
+        # pylint: disable=too-many-locals, too-many-branches
+        if inp.dim() not in (2, 3):
+            raise RuntimeError(
+                f"RNN: Expected input to be 2D or 3D, got {inp.dim()}D tensor instead"
             )
         batch_dim = 0 if self.batch_first else 1
         if states is not None and self.bidirectional:
@@ -287,15 +289,16 @@ class AnalogRNN(AnalogContainerBase, Module):
         if states is not None and len(states) != self.num_layers:
             raise RuntimeError(f"Expecting {self.num_layers} states, but received {len(states)}")
 
-        if not input.dim() == 3:
-            input = input.unsqueeze(batch_dim)
+        if not inp.dim() == 3:
+            inp = inp.unsqueeze(batch_dim)
             if states is not None:
                 for state in flattened_states:
                     for t_name in ["hx", "cx"]:
                         d = getattr(state, t_name).dim()
                         if d != 1:
                             raise RuntimeError(
-                                f"For unbatched 2-D input, {t_name} should be 1-D but got {d}-D tensor"
+                                f"For unbatched 2-D input, {t_name} "
+                                f"should be 1-D but got {d}-D tensor"
                             )
         else:
             if states is not None:
@@ -304,47 +307,53 @@ class AnalogRNN(AnalogContainerBase, Module):
                         d = getattr(state, t_name).dim()
                         if d != 2:
                             raise RuntimeError(
-                                f"For batched 3-D input, {t_name} should be 2-D but got {d}-D tensor"
+                                f"For batched 3-D input, {t_name} "
+                                f"should be 2-D but got {d}-D tensor"
                             )
 
-        max_batch_size = input.size(1)
+        max_batch_size = inp.size(1)
         if states is None:
             states = self.get_zero_state(max_batch_size)
             flattened_states = states if not self.bidirectional else [b for a in states for b in a]
         for state in flattened_states:
-            self.check_forward_args(input, state, max_batch_size)
+            self.check_forward_args(inp, state, max_batch_size)
 
-        return self.rnn(input, states)
+        return self.rnn(inp, states)
 
-    def check_input(self, input: Tensor, batch_size: int) -> None:
-        if self.input_size != input.size(-1):
+    def check_input(self, inp: Tensor) -> None:
+        """Check that input has expected shape"""
+        if self.input_size != inp.size(-1):
             raise RuntimeError(
-                f"input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}"
+                f"input.size(-1) must be equal to input_size. "
+                f"Expected {self.input_size}, got {inp.size(-1)}"
             )
 
     def check_hidden_size(
         self,
-        hx: Tensor,
-        expected_hidden_size: Tuple[int, int, int],
+        h_x: Tensor,
+        expected_hidden_size: Tuple[int, int],
         msg: str = "Expected hidden size {}, got {}",
     ) -> None:
-        if hx.size() != expected_hidden_size:
-            raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
+        """Check that hidden state has expected shape"""
+        if h_x.size() != expected_hidden_size:
+            raise RuntimeError(msg.format(expected_hidden_size, list(h_x.size())))
 
-    def check_forward_args(self, input: Tensor, hidden: List, batch_size: int):
-        self.check_input(input, batch_size)
+    def check_forward_args(self, inp: Tensor, hidden: LSTMState, batch_size: int):
+        """Check that input and hidden state have expected shape"""
+        self.check_input(inp)
         self.check_hidden_size(hidden.hx, (batch_size, self.hidden_size))
         if hidden.cx is not None:
             self.check_hidden_size(hidden.cx, (batch_size, self.hidden_size))
 
-    def update_state_dict(module, state_dict, *args, **kwargs):
-        if not any(["h_l" in a.rsplit(".", 1)[1] for a in state_dict.keys()]):
+    def update_state_dict(self, state_dict, *args, **kwargs):  # pylint: disable=unused-argument
+        """Convert Pytorch LSTM state dict to what AnalogRNN expects"""
+        if not any("h_l" in a.rsplit(".", 1)[1] for a in state_dict.keys()):
             return
-        bidir = hasattr(module.rnn.layers[0], "directions")
+        bidir = hasattr(self.rnn.layers[0], "directions")
         old_state_dict = deepcopy(state_dict)
         for key in old_state_dict.keys():
             stem, suffix = key.rsplit(".", 1)
-            layer = re.search("h_l(\d+)", key).groups()[0]
+            layer = re.search(r"h_l(\d+)", key).groups()[0]
             i_h = re.search("(hh|ih)", key).groups()[0]
             weight_bias = re.search("((weight|bias))", key).groups()[0]
             direction = 1 if "_reverse" in suffix else 0
@@ -353,17 +362,19 @@ class AnalogRNN(AnalogContainerBase, Module):
             state_dict[new_key] = state_dict.pop(key)
 
     def return_pytorch_state_dict(self, module, state_dict, prefix, local_metadata):
+        """Return the state dict for AnalogRNN in standard Pytorch LSTM format"""
+        # pylint: disable=unused-argument
         keys = [key for key in state_dict.keys() if prefix in key]
-        bidir = any(["directions" in key for key in keys])
+        bidir = any("directions" in key for key in keys)
         for key in keys:
             suffix = key.replace(f"{prefix}", "")
             if bidir:
-                _, _, layer, _, dir, _, i_h, weight_bias = suffix.split(".")
+                _, _, layer, _, l_dir, _, i_h, weight_bias = suffix.split(".")
             else:
                 _, _, layer, _, i_h, weight_bias = suffix.split(".")
-                dir = "0"
+                l_dir = "0"
             i_h = i_h[-2:]
-            reverse = "_reverse" if dir == "1" else ""
+            reverse = "_reverse" if l_dir == "1" else ""
             pytorch_suffix = f"{prefix}{weight_bias}_{i_h}_l{layer}{reverse}"
             state_dict[pytorch_suffix] = state_dict.pop(key)
 
@@ -371,9 +382,21 @@ class AnalogRNN(AnalogContainerBase, Module):
     def from_digital(
         cls,
         module: LSTM,
-        rpu_config: Optional[TorchInferenceRPUConfig] = None,
         realistic_read_write: bool = False,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
     ) -> "AnalogRNN":
+        """Return an AnalogRNN module from a torch LSTM layer.
+
+        Args:
+            module: The torch module to convert. All layers that are
+                defined in the ``conversion_map``.
+            realistic_read_write: whether standard PyTorch LSTM weight
+            initialization (default) or Xavier initialization
+            rpu_config: RPU config to use.
+
+        Returns:
+            an AnalogRNN module based on the digital LSTM ``module``.
+        """
         analog_module = AnalogRNN(
             AnalogLSTMCell,
             module.input_size,
@@ -381,8 +404,8 @@ class AnalogRNN(AnalogContainerBase, Module):
             module.num_layers,
             module.bias is not None,
             module.batch_first,
-            module.dropout,
             module.bidirectional,
+            module.dropout,
             module.proj_size,
             realistic_read_write,
             module.weight_hh_l0.device,
@@ -390,7 +413,7 @@ class AnalogRNN(AnalogContainerBase, Module):
             rpu_config,
         )
         for i, layer in enumerate(analog_module.rnn.layers):
-            if analog_module.bidirectional == True:
+            if analog_module.bidirectional:
                 layer.directions[0].cell.weight_ih.set_weights_and_biases(
                     getattr(module, f"weight_ih_l{i}"), getattr(module, f"bias_ih_l{i}")
                 )

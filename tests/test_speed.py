@@ -197,9 +197,8 @@ def lstm_forward_backward_and_step(lstm: Union[LSTM, AnalogRNN], inp: Tensor, op
     optimizer.step()
 
 
-def benchmark_threads(
-    stmt, function, inp, optim, num_threads, label, sub_label, description, results
-):
+def benchmark_test(stmt, function, inp, optim, num_threads, label, sub_label, description, results):
+    """Benchmark function with specified parameters"""
     results.append(
         benchmark.Timer(
             stmt=f"{stmt}({function[0]}, inp, optim)",
@@ -262,7 +261,7 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
         for num_threads in [1, 4, 16, 32]:
             redirect_print(f"Benchmarking size {size} threads {num_threads}...")
             for test, optim, description in zip(layers, optims, descriptions):
-                results = benchmark_threads(
+                results = benchmark_test(
                     "linear_forward_backward_and_step",
                     ("linear", test),
                     inp,
@@ -299,8 +298,8 @@ def benchmark_lstm_speed_and_peak_memory_of_fwd_bwd(
             num_layers=1,
             bias=True,
             batch_first=False,
-            dropout=0.0,
             bidir=True,
+            dropout=0.0,
             proj_size=0,
             xavier=True,
             device=device,
@@ -318,8 +317,8 @@ def benchmark_lstm_speed_and_peak_memory_of_fwd_bwd(
             bidir=True,
             rpu_config=aihwkit_rpu_config,
         )
-        for p in aihwkit_lstm.parameters():
-            p.to(dtype)
+        for param in aihwkit_lstm.parameters():
+            param.to(dtype)
         aihwkit_lstm = aihwkit_lstm.to(device=device, dtype=dtype)
         for layer in aihwkit_lstm.rnn.layers:
             for l_dir in layer.directions:
@@ -350,7 +349,7 @@ def benchmark_lstm_speed_and_peak_memory_of_fwd_bwd(
         for num_threads in [1, 4, 16, 32]:
             redirect_print(f"Benchmarking size {size} threads {num_threads}...")
             for test, optim, description in zip(layers, optims, descriptions):
-                results = benchmark_threads(
+                results = benchmark_test(
                     "lstm_forward_backward_and_step",
                     ("lstm", test),
                     inp,

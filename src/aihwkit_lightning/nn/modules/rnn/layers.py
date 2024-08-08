@@ -15,6 +15,7 @@
 from typing import Any, List, Tuple, Type, Union
 from torch import Tensor, stack, jit, cat
 from torch.nn import ModuleList, Module
+from .cells import LSTMState
 
 
 class AnalogRNNLayer(Module):
@@ -25,8 +26,6 @@ class AnalogRNNLayer(Module):
               AnalogLSTMCellSingleRPU)
         cell_args: arguments to RNNCell (e.g. input_size, hidden_size, rpu_configs)
     """
-
-    # pylint: disable=abstract-method
 
     def __init__(self, cell: Type, *cell_args: Any):
         super().__init__()
@@ -45,7 +44,7 @@ class AnalogRNNLayer(Module):
 
     def forward(
         self, input_: Tensor, state: Union[Tuple[Tensor, Tensor], Tensor]
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+    ) -> Tuple[Tensor, Union[Tuple[Tensor, Tensor], Tensor]]:
         """Forward pass.
 
         Args:
@@ -55,7 +54,6 @@ class AnalogRNNLayer(Module):
         Returns:
             stacked outputs and state
         """
-        # pylint: disable=arguments-differ
         inputs = input_.unbind(0)
         outputs = jit.annotate(List[Tensor], [])
         for input_item in inputs:
@@ -104,8 +102,7 @@ class AnalogReverseRNNLayer(Module):
         Returns:
             stacked reverse outputs and state
         """
-        # pylint: disable=arguments-differ
-        inputs = self.reverse(input_.unbind(0))
+        inputs = self.reverse(list(input_.unbind(0)))
         outputs = jit.annotate(List[Tensor], [])
         for input_values in inputs:
             out, state = self.cell(input_values, state)
@@ -130,7 +127,7 @@ class AnalogBidirRNNLayer(Module):
             [AnalogRNNLayer(cell, *cell_args), AnalogReverseRNNLayer(cell, *cell_args)]
         )
 
-    def get_zero_state(self, batch_size: int) -> Tensor:
+    def get_zero_state(self, batch_size: int) -> Tuple[LSTMState, LSTMState]:
         """Returns a zeroed state.
 
         Args:
@@ -139,10 +136,10 @@ class AnalogBidirRNNLayer(Module):
         Returns:
            Zeroed state tensor
         """
-        return [
+        return (
             self.directions[0].get_zero_state(batch_size),
             self.directions[1].get_zero_state(batch_size),
-        ]
+        )
 
     def forward(
         self, input_: Tensor, states: List[Union[Tuple[Tensor, Tensor], Tensor]]
