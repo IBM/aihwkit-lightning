@@ -382,17 +382,17 @@ class AnalogRNN(AnalogContainerBase, Module):
     def from_digital(
         cls,
         module: LSTM,
-        realistic_read_write: bool = False,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
+        realistic_read_write: bool = False,
     ) -> "AnalogRNN":
         """Return an AnalogRNN module from a torch LSTM layer.
 
         Args:
             module: The torch module to convert. All layers that are
                 defined in the ``conversion_map``.
+            rpu_config: RPU config to use.
             realistic_read_write: whether standard PyTorch LSTM weight
             initialization (default) or Xavier initialization
-            rpu_config: RPU config to use.
 
         Returns:
             an AnalogRNN module based on the digital LSTM ``module``.

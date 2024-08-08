@@ -184,7 +184,7 @@ bsz_num_inp_dims_parameters = [
 @mark.parametrize("ir_init_value", [2.0, 3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0], indirect=True)
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_linear_forward(
     bsz: int,
@@ -245,7 +245,7 @@ def test_linear_forward(
 @mark.parametrize("ir_init_value", [3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_conv2d_forward(
     bsz: int,
@@ -350,7 +350,7 @@ def test_conv2d_forward(
 @mark.parametrize("dilation", [[1, 1]], ids=str)
 @mark.parametrize("groups", [1])
 @mark.parametrize("bias", [True])
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_conv2d_to_and_from_digital(
     height: int,
@@ -422,7 +422,7 @@ layers_dropout_parameters = [
 @mark.parametrize("ir_init_value", [3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_lstm_forward(
     bsz: int,
@@ -544,7 +544,7 @@ def test_lstm_forward(
     [WeightClipType.NONE, WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL],
 )
 @mark.parametrize("clip_sigma", [2.0, 3.0])
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_clipping(
     clip_type: WeightClipType, clip_sigma: float, device: torch_device, dtype: torch_dtype
@@ -590,7 +590,7 @@ def test_clipping(
 @mark.parametrize("ir_init_value", [2.0, 3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0], indirect=True)
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32], ids=str)
 def test_input_range_backward(
     bsz: int,
@@ -663,7 +663,7 @@ def test_input_range_backward(
     ],
 )
 @mark.parametrize("res", [2**5 - 2, 1 / (2**5 - 2)])
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_weight_modifier(
     modifier_type: WeightModifierType, res: float, device: str, dtype: torch_dtype
@@ -726,7 +726,7 @@ def test_weight_modifier(
 
 @mark.parametrize("is_test", [True, False])
 @mark.parametrize("enable_during_test", [False])
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_weight_modifier_gradient(
     is_test: bool, enable_during_test: bool, device: str, dtype: torch_dtype
@@ -789,7 +789,7 @@ def test_weight_modifier_gradient(
 
 @mark.parametrize("is_test", [True, False])
 @mark.parametrize("out_noise_per_channel", [True, False])
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32], ids=str)  # bug in AIHWKIT for fp16 and bfloat16
 def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, dtype: torch_dtype):
     """Test the weight modifier backward behavior."""
