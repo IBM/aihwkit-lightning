@@ -422,8 +422,8 @@ def benchmark_aihwkit_lightning():
     lightning_rpu_all, aihwkit_rpu_all = gen_rpu(
         ir_enable=True, weight_noise_enable=True, clip_enable=False, out_noise_enable=False
     )
-    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
-    benchmark_lstm_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
+    for benchmark_fxn in benchmark_fxns:
+        benchmark_fxn(lightning_rpu_all, aihwkit_rpu_all)
     redirect_print("=====================================================")
 
 
