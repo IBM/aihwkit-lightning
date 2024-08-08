@@ -223,7 +223,6 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
     assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
 
     sizes = [128 * 2**i for i in range(5)]
-    sizes = [512]
     results = []
 
     for size in sizes:

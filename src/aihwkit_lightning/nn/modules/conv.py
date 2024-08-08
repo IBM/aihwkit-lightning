@@ -55,8 +55,6 @@ except ImportError:
 class _AnalogConvNd(AnalogLayerBase, _ConvNd):
     """Base class for convolution layers."""
 
-    NEEDS_INDEXED = False
-
     def __init__(
         self,
         in_channels: int,
@@ -300,10 +298,6 @@ class AnalogConv1d(_AnalogConvNd):
             will be specified from the ``RPUConfig``).
 
     """
-
-    # pylint: disable=abstract-method
-
-    NEEDS_INDEXED = True
 
     def __init__(
         self,
