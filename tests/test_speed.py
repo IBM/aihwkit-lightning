@@ -25,14 +25,10 @@ from torch import cuda as torch_cuda
 from torch import randn, float32, float16, bfloat16, Tensor
 from torch import compile as torch_compile
 from torch.optim import Optimizer, AdamW
-from torch.nn import Linear, LSTM
+from torch.nn import Linear
 from torch.utils import benchmark
 
-from aihwkit.nn import (
-    AnalogLinear as AIHWKITAnalogLinear,
-    AnalogRNN as AIHWKITAnalogRNN,
-    AnalogLSTMCell as AIHWKITAnalogLSTMCell,
-)
+from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
 from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
 from aihwkit.simulator.configs import WeightModifierType as AIHWKITWeightModifierType
@@ -40,7 +36,7 @@ from aihwkit.simulator.configs import WeightClipType as AIHWKITWeightClipType
 from aihwkit.simulator.configs import WeightRemapType
 from aihwkit.optim.analog_optimizer import AnalogOptimizerMixin
 
-from aihwkit_lightning.nn import AnalogLinear, AnalogRNN, AnalogLSTMCell
+from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.simulator.configs import WeightModifierType, WeightClipType
 from aihwkit_lightning.optim import AnalogOptimizer
@@ -190,30 +186,7 @@ def linear_forward_backward_and_step(
     optimizer.step()
 
 
-def lstm_forward_backward_and_step(lstm: Union[LSTM, AnalogRNN], inp: Tensor, optimizer: Optimizer):
-    """Perform the forward, backward and step operations."""
-    out = lstm(inp)[0]
-    out.sum().backward()
-    optimizer.step()
-
-
-def benchmark_test(stmt, function, inp, optim, num_threads, label, sub_label, description, results):
-    """Benchmark function with specified parameters"""
-    results.append(
-        benchmark.Timer(
-            stmt=f"{stmt}({function[0]}, inp, optim)",
-            setup=f"from __main__ import {stmt}",
-            globals={f"{function[0]}": function[1], "inp": inp, "optim": optim},
-            num_threads=num_threads,
-            label=label,
-            sub_label=sub_label,
-            description=description,
-        ).timeit(500)
-    )
-    return results
-
-
-def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
+def benchmark_speed_and_peak_memory_of_fwd_bwd(
     lightning_rpu_config: RPUConfig, aihwkit_rpu_config: AIHWKITRPUConfig
 ):
     """Benchmark the speed and peak memory of the forward pass."""
@@ -223,6 +196,7 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
     assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
 
     sizes = [128 * 2**i for i in range(5)]
+    sizes = [512]
     results = []
 
     for size in sizes:
@@ -230,9 +204,7 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
             in_features=size, out_features=size, bias=True, rpu_config=lightning_rpu_config
         )
         linear = linear.to(device=device, dtype=dtype)
-        lightning_optim = AnalogOptimizer(
-            AdamW, linear.analog_layers(), linear.parameters(), lr=0.0
-        )
+        optim = AnalogOptimizer(AdamW, linear.analog_layers(), linear.parameters(), lr=0.0)
 
         aihwkit_linear = AIHWKITAnalogLinear(
             in_features=size, out_features=size, bias=True, rpu_config=aihwkit_rpu_config
@@ -254,112 +226,44 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
 
         label = "LinearFwdBwdStep"
         sub_label = f"[{size}, {size}]"
-        layers = [linear, aihwkit_linear, torch_linear]
-        optims = [lightning_optim, aihwkit_optim, torch_optim]
-        descriptions = ["AIHWKIT (lightning)", "AIHWKIT", "Torch"]
+
         for num_threads in [1, 4, 16, 32]:
             redirect_print(f"Benchmarking size {size} threads {num_threads}...")
-            for test, optim, description in zip(layers, optims, descriptions):
-                results = benchmark_test(
-                    "linear_forward_backward_and_step",
-                    ("linear", test),
-                    inp,
-                    optim,
-                    num_threads,
-                    label,
-                    sub_label,
-                    description,
-                    results,
-                )
+            results.append(
+                benchmark.Timer(
+                    stmt="linear_forward_backward_and_step(linear, inp, optim)",
+                    setup="from __main__ import linear_forward_backward_and_step",
+                    globals={"linear": linear, "inp": inp, "optim": optim},
+                    num_threads=num_threads,
+                    label=label,
+                    sub_label=sub_label,
+                    description="AIHWKIT (lightning)",
+                ).timeit(500)
+            )
 
-    compare = benchmark.Compare(results)
-    redirect_print(str(compare))
+            results.append(
+                benchmark.Timer(
+                    stmt="linear_forward_backward_and_step(linear, inp, optim)",
+                    setup="from __main__ import linear_forward_backward_and_step",
+                    globals={"linear": aihwkit_linear, "inp": inp, "optim": aihwkit_optim},
+                    num_threads=num_threads,
+                    label=label,
+                    sub_label=sub_label,
+                    description="AIHWKIT",
+                ).timeit(500)
+            )
 
-
-def benchmark_lstm_speed_and_peak_memory_of_fwd_bwd(
-    lightning_rpu_config: RPUConfig, aihwkit_rpu_config: AIHWKITRPUConfig
-):
-    """Benchmark the speed and peak memory of the forward pass."""
-    bsz = 128
-    dtype = float16
-    device = torch_device("cuda" if torch_cuda.is_available() else "cpu")
-    assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
-
-    sizes = [128 * 2**i for i in range(5)]
-    sizes = [512]
-    results = []
-
-    for size in sizes:
-        lstm = AnalogRNN(
-            AnalogLSTMCell,
-            input_size=size,
-            hidden_size=size,
-            num_layers=1,
-            bias=True,
-            batch_first=False,
-            bidir=True,
-            dropout=0.0,
-            proj_size=0,
-            xavier=True,
-            device=device,
-            dtype=dtype,
-            rpu_config=lightning_rpu_config,
-        )
-        lstm = lstm.to(device=device, dtype=dtype)
-        lightning_optim = AnalogOptimizer(AdamW, lstm.analog_layers(), lstm.parameters(), lr=0.0)
-
-        aihwkit_lstm = AIHWKITAnalogRNN(
-            AIHWKITAnalogLSTMCell,
-            input_size=size,
-            hidden_size=size,
-            bias=True,
-            bidir=True,
-            rpu_config=aihwkit_rpu_config,
-        )
-        for param in aihwkit_lstm.parameters():
-            param.to(dtype)
-        aihwkit_lstm = aihwkit_lstm.to(device=device, dtype=dtype)
-        for layer in aihwkit_lstm.rnn.layers:
-            for l_dir in layer.directions:
-                l_dir.cell.weight_ih.set_weights(
-                    randn((size, 4 * size), device=device, dtype=dtype).T
-                )
-                l_dir.cell.weight_hh.set_weights(
-                    randn((size, 4 * size), device=device, dtype=dtype).T
-                )
-        aihwkit_lstm = aihwkit_lstm.to(device=device, dtype=dtype)
-
-        class AihwkitAnalogAdamW(AnalogOptimizerMixin, AdamW):
-            """AIHWKIT AdamW optimizer."""
-
-        aihwkit_optim = AihwkitAnalogAdamW(aihwkit_lstm.parameters(), lr=0.0)
-
-        torch_lstm = LSTM(size, size, bias=True)
-        torch_lstm = torch_lstm.to(device=device, dtype=dtype)
-        torch_optim = AdamW(torch_lstm.parameters(), lr=0.0)
-
-        inp = randn((2, bsz, size), device=device, dtype=dtype, requires_grad=True)
-
-        label = "LSTMFwdBwdStep"
-        sub_label = f"[{size}, {size}]"
-        layers = [lstm, aihwkit_lstm, torch_lstm]
-        optims = [lightning_optim, aihwkit_optim, torch_optim]
-        descriptions = ["AIHWKIT (lightning)", "AIHWKIT", "Torch"]
-        for num_threads in [1, 4, 16, 32]:
-            redirect_print(f"Benchmarking size {size} threads {num_threads}...")
-            for test, optim, description in zip(layers, optims, descriptions):
-                results = benchmark_test(
-                    "lstm_forward_backward_and_step",
-                    ("lstm", test),
-                    inp,
-                    optim,
-                    num_threads,
-                    label,
-                    sub_label,
-                    description,
-                    results,
-                )
-
+            results.append(
+                benchmark.Timer(
+                    stmt="linear_forward_backward_and_step(linear, inp, optim)",
+                    setup="from __main__ import linear_forward_backward_and_step",
+                    globals={"linear": torch_linear, "inp": inp, "optim": torch_optim},
+                    num_threads=num_threads,
+                    label=label,
+                    sub_label=sub_label,
+                    description="torch",
+                ).timeit(500)
+            )
     compare = benchmark.Compare(results)
     redirect_print(str(compare))
 
@@ -377,17 +281,13 @@ def benchmark_aihwkit_lightning():
     """Benchmark the speed of the fwd bwd step for differenet rpu-configs."""
 
     os.makedirs("debug/benchmarks", exist_ok=True)
-    benchmark_fxns = [
-        benchmark_linear_speed_and_peak_memory_of_fwd_bwd,
-        benchmark_lstm_speed_and_peak_memory_of_fwd_bwd,
-    ]
+
     redirect_print("-------------------------------------")
     redirect_print("----------Nothing turned on----------")
     lightning_rpu_config, aihwkit_rpu_config = gen_rpu(
         ir_enable=False, weight_noise_enable=False, clip_enable=False, out_noise_enable=False
     )
-    for benchmark_fxn in benchmark_fxns:
-        benchmark_fxn(lightning_rpu_config, aihwkit_rpu_config)
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_config, aihwkit_rpu_config)
     redirect_print("=====================================\n\n")
 
     redirect_print("--------------------------------------")
@@ -395,8 +295,7 @@ def benchmark_aihwkit_lightning():
     lightning_rpu_clip, aihwkit_rpu_clip = gen_rpu(
         ir_enable=False, weight_noise_enable=False, clip_enable=False, out_noise_enable=False
     )
-    for benchmark_fxn in benchmark_fxns:
-        benchmark_fxn(lightning_rpu_clip, aihwkit_rpu_clip)
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_clip, aihwkit_rpu_clip)
     redirect_print("======================================\n\n")
 
     redirect_print("-----------------------------------------")
@@ -404,8 +303,7 @@ def benchmark_aihwkit_lightning():
     lightning_rpu_weight_noise, aihwkit_rpu_weight_noise = gen_rpu(
         ir_enable=False, weight_noise_enable=True, clip_enable=False, out_noise_enable=False
     )
-    for benchmark_fxn in benchmark_fxns:
-        benchmark_fxn(lightning_rpu_weight_noise, aihwkit_rpu_weight_noise)
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_weight_noise, aihwkit_rpu_weight_noise)
     redirect_print("=========================================\n\n")
 
     redirect_print("--------------------------------")
@@ -413,8 +311,7 @@ def benchmark_aihwkit_lightning():
     lightning_rpu_ir, aihwkit_rpu_ir = gen_rpu(
         ir_enable=True, weight_noise_enable=False, clip_enable=False, out_noise_enable=False
     )
-    for benchmark_fxn in benchmark_fxns:
-        benchmark_fxn(lightning_rpu_ir, aihwkit_rpu_ir)
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_ir, aihwkit_rpu_ir)
     redirect_print("================================\n\n")
 
     redirect_print("-----------------------------------------------------")
@@ -422,8 +319,7 @@ def benchmark_aihwkit_lightning():
     lightning_rpu_all, aihwkit_rpu_all = gen_rpu(
         ir_enable=True, weight_noise_enable=True, clip_enable=False, out_noise_enable=False
     )
-    for benchmark_fxn in benchmark_fxns:
-        benchmark_fxn(lightning_rpu_all, aihwkit_rpu_all)
+    benchmark_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
     redirect_print("=====================================================")
 
 
