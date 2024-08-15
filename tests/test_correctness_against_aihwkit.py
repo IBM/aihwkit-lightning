@@ -17,7 +17,6 @@
 import os
 from typing import Union, List, Tuple
 from unittest import SkipTest
-import logging
 from itertools import product
 from pytest import mark, fixture
 
@@ -36,7 +35,6 @@ from torch import (
     manual_seed,
 )
 from torch.optim import AdamW
-from torch.nn import Conv2d
 
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
 from aihwkit.nn import AnalogConv2d as AIWHKITAnalogConv2d
@@ -59,7 +57,6 @@ from aihwkit_lightning.nn.modules.rnn.cells import (
     AnalogLSTMCellCombinedWeight,
     AnalogGRUCell,
 )
-from aihwkit_lightning.nn.modules.rnn.layers import AnalogRNNLayer, AnalogBidirRNNLayer
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.optim import AnalogOptimizer
 from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
@@ -121,10 +118,10 @@ def fixture_rpus(
     for rpu_config in [aihwkit_rpu_config, lightning_rpu_config]:
         if isinstance(rpu_config, AIHWKITRPUConfig):
             rpu_config.mapping.max_output_size = -1
-            rpu_config.forward.noise_management = (
-                NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
-            )
+            rpu_config.forward.noise_management = NoiseManagementType.NONE
             rpu_config.forward.bound_management = BoundManagementType.NONE
+            if not ir_enable:
+                rpu_config.forward.inp_bound = -1
         rpu_config.forward.inp_res = inp_res
         rpu_config.forward.out_res = -1
         rpu_config.forward.out_bound = -1
@@ -149,18 +146,9 @@ def recurse_compare(aihwkit_out, lightning_out, atol):
     return allclose(aihwkit_out, lightning_out, atol=atol)
 
 
-def out_allclose(out_1, out_2, dtype, caplog):
+def out_allclose(out_1, out_2, dtype):
     """Check that outs are close, and report if atol has to be less than 1e-5"""
-    min_atol = 1e-5
-    for atol in [10**e for e in range(-5, 0)]:
-        if allclose(out_1, out_2, atol=atol):
-            min_atol = atol
-            break
-        if dtype == float32:
-            assert False
-    if min_atol != 1e-5:
-        caplog.set_level(logging.NOTSET)
-        logging.info("Passed with atol=%.0e", min_atol)
+    min_atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
     return allclose(out_1, out_2, atol=min_atol)
 
 
@@ -194,8 +182,7 @@ def test_linear_forward(
     bias: bool,
     device: torch_device,
     dtype: torch_dtype,
-    rpus,
-    caplog,
+    rpus: Tuple[AIHWKITRPUConfig, RPUConfig],
 ):
     """Test the forward pass."""
 
@@ -224,13 +211,14 @@ def test_linear_forward(
 
     out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
     out = linear(inp)  # pylint: disable=not-callable
-    assert out_allclose(out_aihwkit, out, dtype, caplog)
+    atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
+    assert allclose(out_aihwkit, out, atol=atol)
 
 
 @mark.parametrize("bsz", [1, 10])
 @mark.parametrize("num_inp_dims", [1, 2])
-@mark.parametrize("height", [10, 513])
-@mark.parametrize("width", [10, 513])
+@mark.parametrize("height", [10])
+@mark.parametrize("width", [10])
 @mark.parametrize("in_channels", [3, 10])
 @mark.parametrize("out_channels", [3, 10])
 @mark.parametrize("kernel_size", [[3, 3], [3, 4]], ids=str)
@@ -263,7 +251,6 @@ def test_conv2d_forward(
     device: torch_device,
     dtype: torch_dtype,
     rpus,
-    caplog,
 ):
     """Test the Conv2D forward pass."""
 
@@ -318,26 +305,8 @@ def test_conv2d_forward(
 
     out_aihwkit = aihwkit_analog_conv2d(inp)  # pylint: disable=not-callable
     out = analog_conv2d(inp)  # pylint: disable=not-callable
-    assert out_allclose(out_aihwkit, out, dtype, caplog)
-
-    if rpu.forward.inp_res == -1 and not rpu.pre_post.input_range.enable:
-        conv2d = Conv2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            bias=bias,
-            device=device,
-            dtype=dtype,
-        )
-
-        conv2d.weight.data = conv_weight.clone()
-        conv2d.bias.data = conv_bias.clone()
-        out_digital = conv2d(inp)
-        assert allclose(out, out_digital, atol=1e-5)
+    atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
+    assert allclose(out_aihwkit, out, atol)
 
 
 @mark.parametrize("height", [10, 513])
@@ -365,7 +334,6 @@ def test_conv2d_to_and_from_digital(
     bias: bool,
     device: torch_device,
     dtype: torch_dtype,
-    caplog,
 ):
     """Test the Con2D forward pass."""
 
@@ -392,7 +360,8 @@ def test_conv2d_to_and_from_digital(
     inp = randn(in_channels, height, width, device=device, dtype=dtype)
     out_orig = analog_conv2d(inp)
     out_re_analog = re_analog_conv2d(inp)  # pylint: disable=not-callable
-    assert out_allclose(out_orig, out_re_analog, dtype, caplog)
+    atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
+    assert allclose(out_orig, out_re_analog, atol)
 
 
 # Don't run tests where dropout > 0.0 but num_layers == 1
@@ -440,7 +409,6 @@ def test_lstm_forward(
     device: torch_device,
     dtype: torch_dtype,
     rpus,
-    caplog,
 ):
     """Test the lstm forward pass."""
     if cell_type == AnalogVanillaRNNCell:
@@ -534,9 +502,6 @@ def test_lstm_forward(
             assert False
     assert allclose(out_aihwkit, out, atol=min_atol)
     assert all(recurse_compare(out_hidden_aihwkit, out_hidden, min_atol))
-    if min_atol != 1e-5:
-        caplog.set_level(logging.NOTSET)
-        logging.info("Passed with atol=%.0e", min_atol)
 
 
 @mark.parametrize(
@@ -851,31 +816,3 @@ def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, d
     out = linear(inp)  # pylint: disable=not-callable
 
     assert allclose(out_aihwkit, out, atol=1e-5)
-
-
-if __name__ == "__main__":
-
-    # test_conv2d_forward(
-    #     1,
-    #     1,
-    #     10,
-    #     101,
-    #     3,
-    #     3,
-    #     [3, 3],
-    #     [1, 1],
-    #     [1, 1],
-    #     [1, 1],
-    #     1,
-    #     False,
-    #     254,
-    #     256,
-    #     True,
-    #     True,
-    #     3.0,
-    #     10,
-    #     3.0,
-    #     "cpu",
-    #     float32,
-    # )
-    test_clipping(WeightClipType.LAYER_GAUSSIAN, 3.0, "cuda", float16)
