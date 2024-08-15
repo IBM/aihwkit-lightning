@@ -16,11 +16,12 @@
 
 from typing import Optional, Tuple, Union, List
 import os
+from functools import reduce
 from torch import Tensor, cuda, empty, zeros, tensor, int32
 from torch.nn import Parameter
 from torch.nn.functional import unfold
-from torch.nn.modules.conv import _ConvNd, Conv2d
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d
+from torch.nn.modules.utils import _single, _pair
 
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
@@ -53,8 +54,6 @@ except ImportError:
 
 class _AnalogConvNd(AnalogLayerBase, _ConvNd):
     """Base class for convolution layers."""
-
-    NEEDS_INDEXED = False
 
     def __init__(
         self,
@@ -138,7 +137,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
 
     def get_tile_size(self, in_channels: int, groups: int, kernel_size: Tuple[int, ...]) -> int:
         """Calculate the tile size."""
-        raise NotImplementedError
+        return (in_channels // groups) * reduce(lambda x, y: x * y, kernel_size)
 
     def get_split_sizes(self, size: int, split_max_size: int) -> List[int]:
         """Computed the split sizes.
@@ -205,6 +204,221 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             tuple: weight matrix, bias vector
         """
         return (self.weight, self.bias)
+
+    def forward(self, x_input: Tensor) -> Tensor:
+        """Compute the forward pass."""
+
+        modified_weights = self.weight
+        apply_weight_modifier = (
+            self.training or self.rpu_config.modifier.enable_during_test
+        ) and self.rpu_config.modifier.type != WeightModifierType.NONE
+        if apply_weight_modifier:
+            modified_weights = self.weight.clone()
+
+        im_shape = x_input.shape
+        assert isinstance(self.padding, tuple), "Padding must be a tuple"
+        x_input_ = (
+            unfold(
+                x_input,
+                kernel_size=self.kernel_size,
+                dilation=self.dilation,
+                padding=self.padding,
+                stride=self.stride,
+            )
+            .transpose(-1, -2)
+            .contiguous()
+        )
+
+        modified_weights = modified_weights.view(self.out_channels, -1)
+        triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
+        if TRITON_AVAIL and triton_enabled:
+            self.upper_end_of_slices = self.upper_end_of_slices.to(device=modified_weights.device)
+            out = TritonLinear.apply(
+                x_input_,
+                modified_weights,
+                self.input_range,
+                self.input_range_update_idx,
+                self.upper_end_of_slices,
+                self.rpu_config,
+                self.training,
+                apply_weight_modifier,
+            )
+            out = out + self.bias if self.bias is not None else out
+        else:
+            out = TorchLinear.linear(
+                inp=x_input_,
+                weights=modified_weights,
+                bias=self.bias,
+                input_range=self.input_range,
+                input_range_update_idx=self.input_range_update_idx,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                in_sizes=self.in_sizes,
+                training=self.training,
+                rpu_config=self.rpu_config,
+                apply_weight_modifier=apply_weight_modifier,
+            )
+
+        out = out.transpose(-1, -2).contiguous()
+        out_size = (
+            im_shape[-2] + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1
+        ) // self.stride[0] + 1
+        if len(im_shape) == 3:
+            return out.view(self.out_channels, out_size, -1)
+        return out.view(im_shape[0], self.out_channels, out_size, -1)
+
+
+class AnalogConv1d(_AnalogConvNd):
+    """1D convolution layer that uses an analog tile.
+
+    Applies a 1D convolution over an input signal composed of several input
+    planes, using an analog tile for its forward, backward and update passes.
+
+    Note:
+        The tensor parameters of this layer (``.weight`` and ``.bias``) are not
+        guaranteed to contain the same values as the internal weights and biases
+        stored in the analog tile. Please use ``set_weights`` and
+        ``get_weights`` when attempting to read or modify the weight/bias. This
+        read/write process can simulate the (noisy and inexact) analog writing
+        and reading of the resistive elements.
+
+    Args:
+        in_channels: number of channels in the input image.
+        out_channels: number of channels produced by the convolution.
+        kernel_size: size of the convolving kernel.
+        stride: stride of the convolution.
+        padding: zero-padding added to both sides of the input.
+        dilation: spacing between kernel elements.
+        groups: number of blocked connections from input channels to output
+            channels.
+        bias: whether to use a bias row on the analog tile or not.
+        padding_mode: padding strategy. Only ``'zeros'`` is supported.
+        rpu_config: resistive processing unit configuration.
+        tile_module_class: Class for the tile module (default
+            will be specified from the ``RPUConfig``).
+
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int]],
+        stride: Union[int, Tuple[int]] = 1,
+        padding: Union[int, Tuple[int]] = 0,
+        dilation: Union[int, Tuple[int]] = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = "zeros",
+        device=None,
+        dtype=None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
+    ):
+        # pylint: disable=too-many-arguments
+        kernel_size = _single(kernel_size)
+        stride = _single(stride)
+        padding = _single(padding)
+        dilation = _single(dilation)
+
+        if dilation != _single(1):
+            raise ValueError("Only dilation = 1 is supported")
+
+        super().__init__(
+            in_channels,
+            out_channels,
+            (1, kernel_size[0]),  # type: ignore
+            (1, stride[0]),  # type: ignore
+            (0, padding[0]),  # type: ignore
+            (1, dilation[0]),  # type: ignore
+            False,
+            _pair(0),
+            groups,
+            bias,
+            padding_mode,
+            device,
+            dtype,
+            rpu_config,
+        )
+        self._register_load_state_dict_pre_hook(self.update_state_dict)
+        self._register_state_dict_hook(self.return_pytorch_state_dict)
+        self.tensor_view = (-1, 1)
+
+    def forward(self, x_input: Tensor) -> Tensor:
+        x_input_ = x_input.unsqueeze(-2)
+        y = super().forward(x_input_)
+        return y.squeeze(-2)
+
+    @classmethod
+    def from_digital(cls, module: Conv1d, rpu_config: TorchInferenceRPUConfig) -> "AnalogConv1d":
+        """Return an AnalogConv1d layer from a torch Conv1d layer.
+
+        Args:
+            module: The torch module to convert. All layers that are
+                defined in the ``conversion_map``.
+            rpu_config: RPU config to use.
+
+        Returns:
+            an AnalogConv1d layer based on the digital Conv1d ``module``.
+        """
+        analog_layer = cls(
+            module.in_channels,
+            module.out_channels,
+            module.kernel_size,  # type: ignore
+            module.stride,  # type: ignore
+            module.padding,  # type: ignore
+            module.dilation,  # type: ignore
+            module.groups,
+            module.bias is not None,
+            module.padding_mode,
+            None,
+            None,
+            rpu_config,
+        )
+
+        analog_layer.set_weights_and_biases(module.weight.unsqueeze(-2), module.bias)
+        return analog_layer.to(device=module.weight.device, dtype=module.weight.dtype)
+
+    @classmethod
+    def to_digital(cls, module: "AnalogConv1d") -> Conv1d:
+        """Return an nn.Conv1d layer from an AnalogConv1d layer.
+
+        Args:
+            module: The analog module to convert.
+
+        Returns:
+            an torch Linear layer with the same dimension and weights
+            as the analog linear layer.
+        """
+        digital_layer = Conv1d(
+            module.in_channels,
+            module.out_channels,
+            module.kernel_size[1],
+            module.stride[1],
+            module.padding[1],
+            module.dilation[1],
+            module.groups,
+            module.bias is not None,
+            module.padding_mode,
+        )
+        digital_layer.weight.data = module.weight.data.detach().clone()
+        if module.bias is not None:
+            assert digital_layer.bias is not None, "Bias must be present"
+            digital_layer.bias.data = module.bias.data.detach().clone()
+        return digital_layer.to(device=module.weight.device, dtype=module.weight.dtype)
+
+    def update_state_dict(self, state_dict, *args, **kwargs):  # pylint: disable=unused-argument
+        """Update the state dict weight shape to cast Conv1d as AnalogConv2d"""
+        for name, item in state_dict.items():
+            if "weight" in name:
+                state_dict[name] = item.unsqueeze(-2)
+
+    def return_pytorch_state_dict(self, module, state_dict, prefix, local_metadata):
+        # pylint: disable=unused-argument
+        """Return the cast AnalogConv2d weight shape to standard 1d shape"""
+        keys = [key for key in state_dict.keys() if prefix in key]
+        for name, item in [(key, state_dict[key]) for key in keys]:
+            if "weight" in name:
+                state_dict[name] = item.squeeze(-2)
 
 
 class AnalogConv2d(_AnalogConvNd):
@@ -279,72 +493,6 @@ class AnalogConv2d(_AnalogConvNd):
             dtype,
             rpu_config,
         )
-
-    def get_tile_size(self, in_channels: int, groups: int, kernel_size: Tuple[int, ...]) -> int:
-        """Calculate the tile size."""
-        return (in_channels // groups) * kernel_size[0] * kernel_size[1]
-
-    def forward(self, x_input: Tensor) -> Tensor:
-        """Compute the forward pass."""
-
-        modified_weights = self.weight
-        apply_weight_modifier = (
-            self.training or self.rpu_config.modifier.enable_during_test
-        ) and self.rpu_config.modifier.type != WeightModifierType.NONE
-        if apply_weight_modifier:
-            modified_weights = self.weight.clone()
-
-        im_shape = x_input.shape
-        assert isinstance(self.padding, tuple), "Padding must be a tuple"
-        x_input_ = (
-            unfold(
-                x_input,
-                kernel_size=self.kernel_size,
-                dilation=self.dilation,
-                padding=self.padding,
-                stride=self.stride,
-            )
-            .transpose(-1, -2)
-            .contiguous()
-        )
-
-        modified_weights = modified_weights.view(self.out_channels, -1)
-        triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
-        if TRITON_AVAIL and triton_enabled:
-            self.upper_end_of_slices = self.upper_end_of_slices.to(device=modified_weights.device)
-            out = TritonLinear.apply(
-                x_input_,
-                modified_weights,
-                self.input_range,
-                self.input_range_update_idx,
-                self.upper_end_of_slices,
-                self.rpu_config,
-                self.training,
-                apply_weight_modifier,
-            )
-            out = out + self.bias if self.bias is not None else out
-        else:
-            out = TorchLinear.linear(
-                inp=x_input_,
-                weights=modified_weights,
-                bias=self.bias,
-                input_range=self.input_range,
-                input_range_update_idx=self.input_range_update_idx,
-                x_min=self.x_min,
-                x_max=self.x_max,
-                in_sizes=self.in_sizes,
-                training=self.training,
-                rpu_config=self.rpu_config,
-                apply_weight_modifier=apply_weight_modifier,
-            )
-
-        out = out.transpose(-1, -2).contiguous()
-        out_size = (
-            im_shape[-2] + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1
-        ) // self.stride[0] + 1
-        if len(im_shape) == 3:
-            return out.view(self.out_channels, out_size, -1)
-        return out.view(im_shape[0], self.out_channels, out_size, -1)
 
     @classmethod
     def from_digital(cls, module: Conv2d, rpu_config: TorchInferenceRPUConfig) -> "AnalogConv2d":
