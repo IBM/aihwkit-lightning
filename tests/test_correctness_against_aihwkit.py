@@ -11,12 +11,15 @@
 # that they have been altered from the originals.
 
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
+# pylint: disable=too-many-arguments, too-many-branches, too-many-statements
 """Test the forward/backward correctness of our CPU/CUDA version to AIHWKIT."""
 
 import os
-from typing import Union, List
+from typing import Union, List, Tuple
 from unittest import SkipTest
-from pytest import mark
+import logging
+from itertools import product
+from pytest import mark, fixture
 
 from torch import dtype as torch_dtype
 from torch import device as torch_device
@@ -37,11 +40,26 @@ from torch.nn import Conv2d
 
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
 from aihwkit.nn import AnalogConv2d as AIWHKITAnalogConv2d
+from aihwkit.nn.modules.rnn.rnn import AnalogRNN as AIHWKITAnalogRNN
+from aihwkit.nn.modules.rnn.cells import (
+    AnalogVanillaRNNCell as AIHWKITAnalogVanillaRNNCell,
+    AnalogLSTMCell as AIHWKITAnalogLSTMCell,
+    AnalogLSTMCellCombinedWeight as AIHWKITAnalogLSTMCellCombinedWeight,
+    AnalogGRUCell as AIHWKITAnalogGRUCell,
+)
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
 from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
 from aihwkit.simulator.configs import WeightModifierType as AIHWKITWeightModifierType
 
 from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
+from aihwkit_lightning.nn.modules.rnn.rnn import AnalogRNN
+from aihwkit_lightning.nn.modules.rnn.cells import (
+    AnalogVanillaRNNCell,
+    AnalogLSTMCell,
+    AnalogLSTMCellCombinedWeight,
+    AnalogGRUCell,
+)
+from aihwkit_lightning.nn.modules.rnn.layers import AnalogRNNLayer, AnalogBidirRNNLayer
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.optim import AnalogOptimizer
 from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
@@ -50,56 +68,63 @@ from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierTy
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 
 
-@mark.parametrize("bsz", [1, 10])
-@mark.parametrize("num_inp_dims", [1, 2, 3])
-@mark.parametrize("inp_size", [10, 255, 513])
-@mark.parametrize("out_size", [10, 255, 513])
-@mark.parametrize("bias", [True, False])
-@mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
-@mark.parametrize("max_inp_size", [256, 512])
-@mark.parametrize("ir_enable", [True, False])
-@mark.parametrize("ir_learn_input_range", [True, False])
-@mark.parametrize("ir_init_value", [2.0, 3.0])
-@mark.parametrize("ir_init_from_data", [-1, 0, 10])
-@mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
-def test_linear_forward(  # pylint: disable=too-many-arguments
-    bsz: int,
-    num_inp_dims: int,
-    inp_size: int,
-    out_size: int,
-    bias: bool,
-    inp_res: float,
-    max_inp_size: int,
-    ir_enable: bool,
-    ir_learn_input_range: bool,
-    ir_init_value: float,
-    ir_init_from_data: int,
-    ir_init_std_alpha: float,
-    device: torch_device,
-    dtype: torch_dtype,
-):
-    """Test the forward pass."""
+@fixture(scope="module", name="max_inp_size")
+def fixture_max_inp_size(request) -> int:
+    """Maximum input size parameter"""
+    return request.param
 
-    if device == "cuda" and SKIP_CUDA_TESTS:
-        raise SkipTest("CUDA tests are disabled/ can't be performed")
 
-    if not ir_enable and inp_res > 0:
-        raise SkipTest("IR not enabled but inp_res > 0")
+@fixture(scope="module", name="ir_enable_inp_res")
+def fixture_ir_enable_inp_res(request) -> Tuple[bool, float]:
+    """Combination of ir_enable and inp_res parameters"""
+    return request.param
 
-    if num_inp_dims == 1 and bsz > 1:
-        raise SkipTest("1D input but bsz > 1")
 
-    def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
-        # AIHWKIT-specific configurations
+@fixture(scope="module", name="ir_learn_input_range")
+def fixture_ir_learn_input_range(request) -> bool:
+    """Learn input range parameter"""
+    return request.param
+
+
+@fixture(scope="module", name="ir_init_value")
+def fixture_ir_init_value(request) -> float:
+    """IR initialization value parameter"""
+    return request.param
+
+
+@fixture(scope="module", name="ir_init_from_data")
+def fixture_ir_init_from_data(request) -> int:
+    """IR initialization from data parameter"""
+    return request.param
+
+
+@fixture(scope="module", name="ir_init_std_alpha")
+def fixture_ir_init_std_alpha(request) -> float:
+    """IR initialization alpha parameter"""
+    return request.param
+
+
+@fixture(scope="module", name="rpus")
+def fixture_rpus(
+    max_inp_size,
+    ir_enable_inp_res,
+    ir_learn_input_range,
+    ir_init_value,
+    ir_init_from_data,
+    ir_init_std_alpha,
+) -> Tuple[AIHWKITRPUConfig, RPUConfig]:
+    """Fixture for initializing rpus globally for all tests that need them"""
+    ir_enable = ir_enable_inp_res[0]
+    inp_res = ir_enable_inp_res[1]
+    aihwkit_rpu_config = AIHWKITRPUConfig()
+    lightning_rpu_config = RPUConfig()
+    for rpu_config in [aihwkit_rpu_config, lightning_rpu_config]:
         if isinstance(rpu_config, AIHWKITRPUConfig):
             rpu_config.mapping.max_output_size = -1
             rpu_config.forward.noise_management = (
                 NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
             )
             rpu_config.forward.bound_management = BoundManagementType.NONE
-
         rpu_config.forward.inp_res = inp_res
         rpu_config.forward.out_res = -1
         rpu_config.forward.out_bound = -1
@@ -110,10 +135,71 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
         rpu_config.pre_post.input_range.init_value = ir_init_value
         rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
         rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
-        return rpu_config
+    return aihwkit_rpu_config, lightning_rpu_config
 
-    aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
-    rpu = populate_rpu(RPUConfig())
+
+def recurse_compare(aihwkit_out, lightning_out, atol):
+    """Recurse compare to compare LSTM states the same between bidir and unidir layers"""
+    if isinstance(aihwkit_out, (list, tuple)):
+        # Recurse into lists of states
+        return [recurse_compare(aa, bb, atol) for aa, bb in zip(aihwkit_out, lightning_out)]
+    if isinstance(lightning_out, (list, tuple)):
+        # Handle the fact that AIHWKIT doesn't return a tuple sometimes in AnalogRNN
+        return allclose(aihwkit_out, lightning_out[0], atol=atol)
+    return allclose(aihwkit_out, lightning_out, atol=atol)
+
+
+def out_allclose(out_1, out_2, dtype, caplog):
+    """Check that outs are close, and report if atol has to be less than 1e-5"""
+    min_atol = 1e-5
+    for atol in [10**e for e in range(-5, 0)]:
+        if allclose(out_1, out_2, atol=atol):
+            min_atol = atol
+            break
+        if dtype == float32:
+            assert False
+    if min_atol != 1e-5:
+        caplog.set_level(logging.NOTSET)
+        logging.info("Passed with atol=%.0e", min_atol)
+    return allclose(out_1, out_2, atol=min_atol)
+
+
+# Don't run tests where bsz > 1 but num_inp_dims == 1
+bsz_num_inp_dims_parameters = [
+    (bsz, num_inp_dims)
+    for bsz, num_inp_dims in list(product([1, 10], [1, 2, 3]))
+    if not (num_inp_dims == 1 and bsz > 1)
+]
+
+
+@mark.parametrize("bsz, num_inp_dims", bsz_num_inp_dims_parameters)
+@mark.parametrize("inp_size", [10, 255, 513])
+@mark.parametrize("out_size", [10, 255, 513])
+@mark.parametrize("bias", [True, False])
+@mark.parametrize("max_inp_size", [256, 512], indirect=True)
+@mark.parametrize(
+    "ir_enable_inp_res", [(True, 2**8 - 2), (True, 1 / 2**8 - 2)], ids=str, indirect=True
+)
+@mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
+@mark.parametrize("ir_init_value", [2.0, 3.0], indirect=True)
+@mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
+@mark.parametrize("ir_init_std_alpha", [2.0, 3.0], indirect=True)
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+def test_linear_forward(
+    bsz: int,
+    num_inp_dims: int,
+    inp_size: int,
+    out_size: int,
+    bias: bool,
+    device: torch_device,
+    dtype: torch_dtype,
+    rpus,
+    caplog,
+):
+    """Test the forward pass."""
+
+    aihwkit_rpu, rpu = rpus
 
     aihwkit_linear = AIHWKITAnalogLinear(
         in_features=inp_size, out_features=out_size, bias=bias, rpu_config=aihwkit_rpu
@@ -138,7 +224,7 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
 
     out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
     out = linear(inp)  # pylint: disable=not-callable
-    assert allclose(out_aihwkit, out, atol=1e-5)
+    assert out_allclose(out_aihwkit, out, dtype, caplog)
 
 
 @mark.parametrize("bsz", [1, 10])
@@ -147,22 +233,21 @@ def test_linear_forward(  # pylint: disable=too-many-arguments
 @mark.parametrize("width", [10, 513])
 @mark.parametrize("in_channels", [3, 10])
 @mark.parametrize("out_channels", [3, 10])
-@mark.parametrize("kernel_size", [[3, 3], [3, 4]])
-@mark.parametrize("stride", [[1, 1]])
-@mark.parametrize("padding", [[1, 1]])
-@mark.parametrize("dilation", [[1, 1]])
+@mark.parametrize("kernel_size", [[3, 3], [3, 4]], ids=str)
+@mark.parametrize("stride", [[1, 1]], ids=str)
+@mark.parametrize("padding", [[1, 1]], ids=str)
+@mark.parametrize("dilation", [[1, 1]], ids=str)
 @mark.parametrize("groups", [1])
 @mark.parametrize("bias", [True])
-@mark.parametrize("inp_res", [2**8 - 2])
-@mark.parametrize("max_inp_size", [256, 512])
-@mark.parametrize("ir_enable", [True, False])
-@mark.parametrize("ir_learn_input_range", [True, False])
-@mark.parametrize("ir_init_value", [3.0])
-@mark.parametrize("ir_init_from_data", [10])
-@mark.parametrize("ir_init_std_alpha", [3.0])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
-def test_conv2d_forward(  # pylint: disable=too-many-arguments
+@mark.parametrize("max_inp_size", [256, 512], indirect=True)
+@mark.parametrize("ir_enable_inp_res", [(True, 2**8 - 2)], ids=str, indirect=True)
+@mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
+@mark.parametrize("ir_init_value", [3.0], indirect=True)
+@mark.parametrize("ir_init_from_data", [10], indirect=True)
+@mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+def test_conv2d_forward(
     bsz: int,
     num_inp_dims: int,
     height: int,
@@ -175,50 +260,17 @@ def test_conv2d_forward(  # pylint: disable=too-many-arguments
     dilation: List[int],
     groups: int,
     bias: bool,
-    inp_res: float,
-    max_inp_size: int,
-    ir_enable: bool,
-    ir_learn_input_range: bool,
-    ir_init_value: float,
-    ir_init_from_data: int,
-    ir_init_std_alpha: float,
     device: torch_device,
     dtype: torch_dtype,
+    rpus,
+    caplog,
 ):
-    """Test the Con2D forward pass."""
-
-    if device == "cuda" and SKIP_CUDA_TESTS:
-        raise SkipTest("CUDA tests are disabled/ can't be performed")
-
-    if not ir_enable and inp_res > 0:
-        raise SkipTest("IR not enabled but inp_res > 0")
+    """Test the Conv2D forward pass."""
 
     if groups > 1:
         raise SkipTest("AIHWKIT currently does not support groups > 1")
 
-    def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
-        # AIHWKIT-specific configurations
-        if isinstance(rpu_config, AIHWKITRPUConfig):
-            rpu_config.mapping.max_output_size = -1
-            rpu_config.forward.noise_management = (
-                NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
-            )
-            rpu_config.forward.bound_management = BoundManagementType.NONE
-
-        rpu_config.forward.inp_res = inp_res
-        rpu_config.forward.out_res = -1
-        rpu_config.forward.out_bound = -1
-        rpu_config.forward.out_noise = 0.0
-        rpu_config.mapping.max_input_size = max_inp_size
-        rpu_config.pre_post.input_range.enable = ir_enable
-        rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
-        rpu_config.pre_post.input_range.init_value = ir_init_value
-        rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
-        rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
-        return rpu_config
-
-    aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
-    rpu = populate_rpu(RPUConfig())
+    aihwkit_rpu, rpu = rpus
 
     aihwkit_analog_conv2d = AIWHKITAnalogConv2d(
         in_channels=in_channels,
@@ -266,9 +318,9 @@ def test_conv2d_forward(  # pylint: disable=too-many-arguments
 
     out_aihwkit = aihwkit_analog_conv2d(inp)  # pylint: disable=not-callable
     out = analog_conv2d(inp)  # pylint: disable=not-callable
-    assert allclose(out_aihwkit, out, atol=1e-5)
+    assert out_allclose(out_aihwkit, out, dtype, caplog)
 
-    if inp_res == -1 and not ir_enable:
+    if rpu.forward.inp_res == -1 and not rpu.pre_post.input_range.enable:
         conv2d = Conv2d(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -292,15 +344,15 @@ def test_conv2d_forward(  # pylint: disable=too-many-arguments
 @mark.parametrize("width", [10, 513])
 @mark.parametrize("in_channels", [3, 10])
 @mark.parametrize("out_channels", [3, 10])
-@mark.parametrize("kernel_size", [[3, 3]])
-@mark.parametrize("stride", [[1, 1]])
-@mark.parametrize("padding", [[1, 1]])
-@mark.parametrize("dilation", [[1, 1]])
+@mark.parametrize("kernel_size", [[3, 3]], ids=str)
+@mark.parametrize("stride", [[1, 1]], ids=str)
+@mark.parametrize("padding", [[1, 1]], ids=str)
+@mark.parametrize("dilation", [[1, 1]], ids=str)
 @mark.parametrize("groups", [1])
 @mark.parametrize("bias", [True])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
-def test_conv2d_to_and_from_digital(  # pylint: disable=too-many-arguments
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+def test_conv2d_to_and_from_digital(
     height: int,
     width: int,
     in_channels: int,
@@ -313,11 +365,9 @@ def test_conv2d_to_and_from_digital(  # pylint: disable=too-many-arguments
     bias: bool,
     device: torch_device,
     dtype: torch_dtype,
+    caplog,
 ):
     """Test the Con2D forward pass."""
-
-    if device == "cuda" and SKIP_CUDA_TESTS:
-        raise SkipTest("CUDA tests are disabled/ can't be performed")
 
     if groups > 1:
         raise SkipTest("AIHWKIT currently does not support groups > 1")
@@ -342,7 +392,151 @@ def test_conv2d_to_and_from_digital(  # pylint: disable=too-many-arguments
     inp = randn(in_channels, height, width, device=device, dtype=dtype)
     out_orig = analog_conv2d(inp)
     out_re_analog = re_analog_conv2d(inp)  # pylint: disable=not-callable
-    assert allclose(out_orig, out_re_analog, atol=1e-5)
+    assert out_allclose(out_orig, out_re_analog, dtype, caplog)
+
+
+# Don't run tests where dropout > 0.0 but num_layers == 1
+layers_dropout_parameters = [
+    (num_layers, dropout)
+    for num_layers, dropout in list(product([1, 3], [0.0, 0.1]))
+    if (num_layers > 1) or (num_layers == 1 and dropout == 0.0)
+]
+
+
+@mark.parametrize("bsz", [0, 1, 3])
+@mark.parametrize(
+    "cell_type", [AnalogVanillaRNNCell, AnalogLSTMCell, AnalogLSTMCellCombinedWeight, AnalogGRUCell]
+)
+@mark.parametrize("sequence_length", [1, 3])
+@mark.parametrize("input_size", [15, 33])
+@mark.parametrize("hidden_size", [15, 33])
+@mark.parametrize("num_layers, dropout", layers_dropout_parameters)
+@mark.parametrize("bias", [True, False])
+@mark.parametrize("batch_first", [False])
+@mark.parametrize("bidir", [True, False])
+@mark.parametrize("proj_size", [0])
+@mark.parametrize("realistic_read_write", [True, False])
+@mark.parametrize("max_inp_size", [15, 33], indirect=True)
+@mark.parametrize("ir_enable_inp_res", [(True, 2**8 - 2)], ids=str, indirect=True)
+@mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
+@mark.parametrize("ir_init_value", [3.0], indirect=True)
+@mark.parametrize("ir_init_from_data", [10], indirect=True)
+@mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+def test_lstm_forward(
+    bsz: int,
+    cell_type,
+    sequence_length: int,
+    input_size: int,
+    hidden_size: int,
+    num_layers: int,
+    bias: bool,
+    batch_first: bool,
+    dropout: float,
+    bidir: bool,
+    proj_size: int,
+    realistic_read_write: bool,
+    device: torch_device,
+    dtype: torch_dtype,
+    rpus,
+    caplog,
+):
+    """Test the lstm forward pass."""
+    if cell_type == AnalogVanillaRNNCell:
+        aihwkit_cell = AIHWKITAnalogVanillaRNNCell
+    elif cell_type == AnalogLSTMCell:
+        aihwkit_cell = AIHWKITAnalogLSTMCell
+    elif cell_type == AnalogLSTMCellCombinedWeight:
+        aihwkit_cell = AIHWKITAnalogLSTMCellCombinedWeight
+    elif cell_type == AnalogGRUCell:
+        aihwkit_cell = AIHWKITAnalogGRUCell
+    else:
+        raise RuntimeError("Unrecognized cell type in test_lstm_forward")
+
+    aihwkit_rpu, rpu = rpus
+
+    aihwkit_lstm = AIHWKITAnalogRNN(
+        cell=aihwkit_cell,
+        input_size=input_size,
+        hidden_size=hidden_size,
+        bias=bias,
+        rpu_config=aihwkit_rpu,
+        xavier=realistic_read_write,
+        num_layers=num_layers,
+        bidir=bidir,
+        dropout=dropout,
+    )
+    lstm = AnalogRNN(
+        cell=cell_type,
+        input_size=input_size,
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        bias=bias,
+        batch_first=batch_first,
+        bidir=bidir,
+        dropout=dropout,
+        proj_size=proj_size,
+        xavier=realistic_read_write,
+        device=device,
+        dtype=dtype,
+        rpu_config=rpu,
+    )
+    aihwkit_lstm = aihwkit_lstm.eval()
+    lstm = lstm.eval()
+
+    # AIHWKIT does not properly convert the AnalogContext of TorchSimulatorTile to (b)float16,
+    # resulting in a failure
+    aihwkit_lstm = aihwkit_lstm.to(device=device, dtype=dtype)
+    for param in aihwkit_lstm.parameters():
+        param.to(dtype)
+    for aihwkit_layer, layer in zip(aihwkit_lstm.rnn.layers, lstm.rnn.layers):
+        if bidir:
+            for aihwkit_dir, l_dir in zip(aihwkit_layer.directions, layer.directions):
+                if cell_type == AnalogLSTMCellCombinedWeight:
+                    aihwkit_weight, aihwkit_bias = aihwkit_dir.cell.weight.get_weights()
+                    l_dir.cell.weight.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+                else:
+                    aihwkit_weight, aihwkit_bias = aihwkit_dir.cell.weight_ih.get_weights()
+                    l_dir.cell.weight_ih.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+                    aihwkit_weight, aihwkit_bias = aihwkit_dir.cell.weight_hh.get_weights()
+                    l_dir.cell.weight_hh.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+        else:
+            if cell_type == AnalogLSTMCellCombinedWeight:
+                aihwkit_weight, aihwkit_bias = aihwkit_layer.cell.weight.get_weights()
+                layer.cell.weight.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+            else:
+                aihwkit_weight, aihwkit_bias = aihwkit_layer.cell.weight_ih.get_weights()
+                layer.cell.weight_ih.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+                aihwkit_weight, aihwkit_bias = aihwkit_layer.cell.weight_hh.get_weights()
+                layer.cell.weight_hh.set_weights_and_biases(aihwkit_weight, aihwkit_bias)
+
+    lstm = lstm.to(device=device, dtype=dtype)
+
+    if bsz == 0:
+        inp = randn(sequence_length, input_size, device=device, dtype=dtype)
+        # aihwkit can't do unbatched inputs
+        aihwkit_inp = inp.unsqueeze(1)
+    else:
+        inp = randn(sequence_length, bsz, input_size, device=device, dtype=dtype)
+        aihwkit_inp = inp
+    out, out_hidden = lstm(inp)  # pylint: disable=not-callable
+    out_aihwkit, out_hidden_aihwkit = aihwkit_lstm(aihwkit_inp)  # pylint: disable=not-callable
+
+    min_atol = 1e-5
+    for atol in [10**e for e in range(-5, -1)]:
+        if allclose(out_aihwkit, out, atol=atol) and all(
+            recurse_compare(out_hidden_aihwkit, out_hidden, atol)
+        ):
+            min_atol = atol
+            break
+        if dtype == float32:
+            assert False
+    assert allclose(out_aihwkit, out, atol=min_atol)
+    assert all(recurse_compare(out_hidden_aihwkit, out_hidden, min_atol))
+    if min_atol != 1e-5:
+        caplog.set_level(logging.NOTSET)
+        logging.info("Passed with atol=%.0e", min_atol)
 
 
 @mark.parametrize(
@@ -350,14 +544,14 @@ def test_conv2d_to_and_from_digital(  # pylint: disable=too-many-arguments
     [WeightClipType.NONE, WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL],
 )
 @mark.parametrize("clip_sigma", [2.0, 3.0])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_clipping(
     clip_type: WeightClipType, clip_sigma: float, device: torch_device, dtype: torch_dtype
 ):
     """Test the clipping."""
 
-    device = torch_device("cpu") if device == "cpu" or SKIP_CUDA_TESTS else torch_device(device)
+    device = torch_device(device)
 
     rpu_config = RPUConfig()
     rpu_config.clip.type = clip_type
@@ -384,63 +578,36 @@ def test_clipping(
         raise ValueError(f"Unknown clip type {clip_type}")
 
 
-@mark.parametrize("bsz", [1, 10])
-@mark.parametrize("num_inp_dims", [1, 2, 3])
+@mark.parametrize("bsz, num_inp_dims", bsz_num_inp_dims_parameters)
 @mark.parametrize("inp_size", [10, 255, 513])
 @mark.parametrize("out_size", [10, 255, 513])
 @mark.parametrize("bias", [True, False])
-@mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
-@mark.parametrize("max_inp_size", [256, 512])
-@mark.parametrize("ir_init_value", [2.0, 3.0])
-@mark.parametrize("ir_init_from_data", [-1, 0, 10])
-@mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32])
-def test_input_range_backward(  # pylint: disable=too-many-arguments
+@mark.parametrize(
+    "ir_enable_inp_res", [(True, 2**8 - 2), (True, 1 / 2**8 - 2)], ids=str, indirect=True
+)
+@mark.parametrize("ir_learn_input_range", [True], indirect=True)
+@mark.parametrize("max_inp_size", [256, 512], indirect=True)
+@mark.parametrize("ir_init_value", [2.0, 3.0], indirect=True)
+@mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
+@mark.parametrize("ir_init_std_alpha", [2.0, 3.0], indirect=True)
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32], ids=str)
+def test_input_range_backward(
     bsz: int,
     num_inp_dims: int,
     inp_size: int,
     out_size: int,
     bias: bool,
-    inp_res: float,
-    max_inp_size: int,
-    ir_init_value: float,
-    ir_init_from_data: int,
-    ir_init_std_alpha: float,
     device: str,
     dtype: torch_dtype,
+    rpus,
 ):
     """Test the input range backward pass."""
 
-    if device == "cuda" and SKIP_CUDA_TESTS:
-        raise SkipTest("CUDA tests are disabled/ can't be performed")
-
-    if num_inp_dims == 1 and bsz > 1:
-        raise SkipTest("1D input but bsz > 1")
-
     manual_seed(0)
 
-    def populate_rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
-        # AIHWKIT-specific configurations
-        if isinstance(rpu_config, AIHWKITRPUConfig):
-            rpu_config.mapping.max_output_size = -1
-            rpu_config.forward.noise_management = NoiseManagementType.NONE
-            rpu_config.forward.bound_management = BoundManagementType.NONE
-
-        rpu_config.forward.inp_res = inp_res
-        rpu_config.forward.out_res = -1
-        rpu_config.forward.out_bound = -1
-        rpu_config.forward.out_noise = 0.0
-        rpu_config.mapping.max_input_size = max_inp_size
-        rpu_config.pre_post.input_range.enable = True
-        rpu_config.pre_post.input_range.learn_input_range = True
-        rpu_config.pre_post.input_range.init_value = ir_init_value
-        rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
-        rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
-        return rpu_config
-
-    aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
-    rpu = populate_rpu(RPUConfig())
+    aihwkit_rpu, rpu = rpus
+    aihwkit_rpu.forward.noise_management = NoiseManagementType.NONE
 
     aihwkit_linear = AIHWKITAnalogLinear(
         in_features=inp_size, out_features=out_size, bias=bias, rpu_config=aihwkit_rpu
@@ -496,15 +663,12 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     ],
 )
 @mark.parametrize("res", [2**5 - 2, 1 / (2**5 - 2)])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_weight_modifier(
     modifier_type: WeightModifierType, res: float, device: str, dtype: torch_dtype
 ):
     """Test the weight modifier."""
-
-    if device == "cuda" and SKIP_CUDA_TESTS:
-        raise SkipTest("CUDA tests are disabled/ can't be performed")
 
     if res > 0 and modifier_type not in [
         WeightModifierType.DISCRETIZE,
@@ -562,15 +726,12 @@ def test_weight_modifier(
 
 @mark.parametrize("is_test", [True, False])
 @mark.parametrize("enable_during_test", [False])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_weight_modifier_gradient(
     is_test: bool, enable_during_test: bool, device: str, dtype: torch_dtype
 ):
     """Test the weight modifier backward behavior."""
-
-    if device == "cuda" and SKIP_CUDA_TESTS:
-        raise SkipTest("CUDA tests are disabled/ can't be performed")
 
     manual_seed(0)
     in_size = 10
@@ -628,8 +789,8 @@ def test_weight_modifier_gradient(
 
 @mark.parametrize("is_test", [True, False])
 @mark.parametrize("out_noise_per_channel", [True, False])
-@mark.parametrize("device", ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32])  # bug in AIHWKIT for fp16 and bfloat16
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32], ids=str)  # bug in AIHWKIT for fp16 and bfloat16
 def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, dtype: torch_dtype):
     """Test the weight modifier backward behavior."""
 
