@@ -20,7 +20,7 @@ from torch.autograd.function import FunctionCtx
 from torch import Tensor, empty, float32, randint, zeros_like, clamp
 from aihwkit_lightning.nn.modules.triton_utils.triton_abs_max import sliced_fast_abs_max
 from aihwkit_lightning.nn.modules.triton_utils.triton_std import sliced_fast_std
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
 
 
 # fmt: off
@@ -179,6 +179,10 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
     out_noise_seed,
     inp_res: tl.constexpr,
     is_fp: tl.constexpr,
+    out_res: tl.constexpr,
+    out_quant: tl.constexpr,
+    out_bound: tl.constexpr,
+    bound_per_channel: tl.constexpr,
     out_noise: tl.constexpr,
     out_noise_std: tl.constexpr,
     out_noise_per_channel: tl.constexpr,
@@ -208,6 +212,9 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
     pid_n = (pid % num_pid_in_group) // GROUP_SIZE_INP
 
     accumulator = tl.zeros((BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32)
+    # for every slice, this gets reset to zero. at the end of every slice,
+    # this gets added to the accumulator
+    per_slice_accumulator = tl.zeros((BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32)
 
     # for random number generation of output
     increase_out_offsets_by = BLOCK_SIZE_INP * BLOCK_SIZE_OUT
@@ -223,6 +230,10 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
 
     ir_range_lower = 0
     for slice_idx in range(0, num_slices):
+        if slice_idx > 0:
+            # don't reset in first round
+            # need to reset the per-slice acc. to zero
+            per_slice_accumulator = tl.zeros((BLOCK_SIZE_INP, BLOCK_SIZE_OUT), dtype=tl.float32)
 
         # load the abs-max we need
         abs_max_slice_ptrs = (
@@ -238,6 +249,14 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
             assumed_wmax_per_slice = assumed_wmax_per_slice[None, :]
         else:
             assumed_wmax_per_slice = tl.load(reduced_assumed_wmax_ptr + slice_idx)
+
+        if bound_per_channel and not (out_noise and out_noise_per_channel):
+            bound_scale = tl.load(
+                abs_max_slice_ptrs, mask=offs_assumed_wmax < out_size, other=float("-inf")
+            )
+            bound_scale = bound_scale[None, :]
+        else:
+            bound_scale = assumed_wmax_per_slice
 
         # this gives a speedup for large input dimension
         if num_slices == 1:
@@ -319,7 +338,7 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
 
             # scale back with the input range
             dot_prod = input_range.to(tl.float32) * dot_prod
-            accumulator = accumulator + dot_prod
+            per_slice_accumulator = per_slice_accumulator + dot_prod
 
             # increment the pointers
             offs_k += current_upper - current_lower
@@ -327,6 +346,26 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
             b_ptrs += (current_upper - current_lower) * stride_weights_hidden_size
 
             current_lower = current_upper
+
+        # here, the MVM for the slice was completed. We can apply the ADC
+        if out_quant or out_bound > 0:
+            # compute the bound
+            bound = bound_scale * out_bound * input_range.to(tl.float32)  # we just scale with abs-max of weight
+            if out_quant:
+                alpha = (bound.to(tl.float32) * out_res)
+                per_slice_accumulator = per_slice_accumulator / alpha
+                per_slice_accumulator = tl.extra.cuda.libdevice.rint(per_slice_accumulator)
+                per_slice_accumulator = per_slice_accumulator * alpha
+
+            if out_bound > 0:
+                # clip between the input ranges
+                over_out_bound_mask = per_slice_accumulator > bound
+                under_out_bound_mask = per_slice_accumulator < -bound
+                per_slice_accumulator = tl.where(over_out_bound_mask, bound, per_slice_accumulator)
+                per_slice_accumulator = tl.where(under_out_bound_mask, -bound, per_slice_accumulator)
+
+        accumulator = accumulator + per_slice_accumulator
+
         ir_range_lower = ir_range_upper
 
     out_block = accumulator.to(dtype)
@@ -472,6 +511,17 @@ class TritonLinear(Function):
             inp_res = 2.0 / inp_res if inp_res > 1.0 else 2.0 * inp_res
             assert inp_res > 0, "resolution is <= 0"
 
+        # do the same for the out_res
+        out_bound = rpu_config.forward.out_bound
+        out_res = rpu_config.forward.out_res
+        if out_res > 0:
+            out_res = 2.0 / out_res if out_res > 1.0 else 2.0 * out_res
+            assert out_res > 0, "resolution is <= 0"
+        # do we need wmax per column?
+        bound_per_channel = (
+            out_bound > 0
+        ) and rpu_config.clip.type == WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL
+
         # bring output noise variables into shape
         out_noise = training and (not rpu_config.forward.out_noise == 0.0)
         out_noise_std = rpu_config.forward.out_noise
@@ -515,7 +565,11 @@ class TritonLinear(Function):
             # miscellaneous
             out_noise_seed,
             inp_res,  # inp_res
-            inp_res == -1 or skip_rounding,  # is_fp
+            inp_res <= 0 or skip_rounding,  # is_fp
+            out_res,  # out_res
+            not skip_rounding and out_res > 0,  # out_quant?
+            out_bound,
+            bound_per_channel,
             out_noise,
             out_noise_std,
             out_noise_per_channel,

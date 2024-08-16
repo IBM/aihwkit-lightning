@@ -130,12 +130,20 @@ def test_torch_compile(  # pylint: disable=too-many-arguments
     forward_backward(linear, inp)
 
 
-def gen_rpu(ir_enable: bool, weight_noise_enable: bool, clip_enable: bool, out_noise_enable: bool):
+def gen_rpu(
+    ir_enable: bool,
+    weight_noise_enable: bool,
+    clip_enable: bool,
+    out_noise_enable: bool,
+    adc_enable: bool,
+):
     """Generate the RPU configuration."""
 
     def rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
         rpu_config.mapping.max_input_size = -1
         rpu_config.forward.inp_res = 254 if ir_enable else -1
+        rpu_config.forward.out_res = 254 if adc_enable else -1
+        rpu_config.forward.out_bound = 12 if adc_enable else -1
         rpu_config.forward.out_noise = 0.02 if out_noise_enable else 0.0
         rpu_config.pre_post.input_range.enable = ir_enable
         rpu_config.pre_post.input_range.learn_input_range = True
@@ -186,7 +194,7 @@ def linear_forward_backward_and_step(
     optimizer.step()
 
 
-def lstm_forward_backward_and_step(lstm: Union[LSTM, AnalogRNN], inp: Tensor, optimizer: Optimizer):
+def lstm_forward_backward_and_step(lstm: LSTM, inp: Tensor, optimizer: Optimizer):
     """Perform the forward, backward and step operations."""
     out = lstm(inp)[0]
     out.sum().backward()
@@ -253,8 +261,7 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
         layers = [linear, aihwkit_linear, torch_linear]
         optims = [lightning_optim, aihwkit_optim, torch_optim]
         descriptions = ["AIHWKIT (lightning)", "AIHWKIT", "Torch"]
-        for num_threads in [1, 4, 16, 32]:
-            redirect_print(f"Benchmarking size {size} threads {num_threads}...")
+        for num_threads in [1]:
             for test, optim, description in zip(layers, optims, descriptions):
                 results = benchmark_test(
                     "linear_forward_backward_and_step",
@@ -285,73 +292,90 @@ def benchmark_aihwkit_lightning():
     """Benchmark the speed of the fwd bwd step for differenet rpu-configs."""
 
     os.makedirs("debug/benchmarks", exist_ok=True)
-    redirect_print("-------------------------------------")
-    redirect_print("----------Nothing turned on----------")
-    lightning_rpu_config, aihwkit_rpu_config = gen_rpu(
-        ir_enable=False, weight_noise_enable=False, clip_enable=False, out_noise_enable=False
-    )
-    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_config, aihwkit_rpu_config)
-    redirect_print("=====================================\n\n")
+    # redirect_print("-------------------------------------")
+    # redirect_print("----------Nothing turned on----------")
+    # lightning_rpu_config, aihwkit_rpu_config = gen_rpu(
+    #     ir_enable=False, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
+    # )
+    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_config, aihwkit_rpu_config)
+    # redirect_print("=====================================\n\n")
 
-    redirect_print("--------------------------------------")
-    redirect_print("---------------Clipping---------------")
-    lightning_rpu_clip, aihwkit_rpu_clip = gen_rpu(
-        ir_enable=False, weight_noise_enable=False, clip_enable=True, out_noise_enable=False
-    )
-    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_clip, aihwkit_rpu_clip)
-    redirect_print("======================================\n\n")
+    # redirect_print("--------------------------------------")
+    # redirect_print("---------------Clipping---------------")
+    # lightning_rpu_clip, aihwkit_rpu_clip = gen_rpu(
+    #     ir_enable=False, weight_noise_enable=False, clip_enable=True, out_noise_enable=False, adc_enable=False
+    # )
+    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_clip, aihwkit_rpu_clip)
+    # redirect_print("======================================\n\n")
 
-    redirect_print("-----------------------------------------")
-    redirect_print("---------------WeightNoise---------------")
-    lightning_rpu_weight_noise, aihwkit_rpu_weight_noise = gen_rpu(
-        ir_enable=False, weight_noise_enable=True, clip_enable=False, out_noise_enable=False
-    )
-    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
-        lightning_rpu_weight_noise, aihwkit_rpu_weight_noise
-    )
-    redirect_print("=========================================\n\n")
+    # redirect_print("-----------------------------------------")
+    # redirect_print("---------------WeightNoise---------------")
+    # lightning_rpu_weight_noise, aihwkit_rpu_weight_noise = gen_rpu(
+    #     ir_enable=False, weight_noise_enable=True, clip_enable=False, out_noise_enable=False, adc_enable=False
+    # )
+    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
+    #     lightning_rpu_weight_noise, aihwkit_rpu_weight_noise
+    # )
+    # redirect_print("=========================================\n\n")
 
-    redirect_print("--------------------------------")
-    redirect_print("---------------IR---------------")
-    lightning_rpu_ir, aihwkit_rpu_ir = gen_rpu(
-        ir_enable=True, weight_noise_enable=False, clip_enable=False, out_noise_enable=False
-    )
-    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_ir, aihwkit_rpu_ir)
-    redirect_print("================================\n\n")
+    # redirect_print("--------------------------------")
+    # redirect_print("---------------IR---------------")
+    # lightning_rpu_ir, aihwkit_rpu_ir = gen_rpu(
+    #     ir_enable=True, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
+    # )
+    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_ir, aihwkit_rpu_ir)
+    # redirect_print("================================\n\n")
 
     redirect_print("-----------------------------------------------------")
     redirect_print("---------------Clipping+WeightNoise+IR---------------")
     lightning_rpu_all, aihwkit_rpu_all = gen_rpu(
-        ir_enable=True, weight_noise_enable=True, clip_enable=True, out_noise_enable=False
+        ir_enable=True,
+        weight_noise_enable=True,
+        clip_enable=True,
+        out_noise_enable=False,
+        adc_enable=False,
+    )
+    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
+    redirect_print("=====================================================")
+
+    redirect_print("-----------------------------------------------------")
+    redirect_print("---------------Clipping+WeightNoise+IR+OutNoise------")
+    lightning_rpu_all, aihwkit_rpu_all = gen_rpu(
+        ir_enable=True,
+        weight_noise_enable=True,
+        clip_enable=True,
+        out_noise_enable=True,
+        adc_enable=False,
     )
     benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
     redirect_print("=====================================================")
 
 
-def benchmark_triton_implementation():
+def benchmark_triton_implementation(max_input_size: int):
     """Test the speed of the triton implementation compared to AIHWKIT."""
     assert TRITON_AVAIL, "Triton is not available"
 
-    def bench(layer: AnalogLinear, inp: Tensor):
+    def bench(layer: AnalogLinear, inp: Tensor, optim: AdamW):
         """Pass the inputs through the layer"""
         out = layer(inp)
         loss = out.mean()
         loss.backward()
+        optim.step()
 
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=["n_cols", "n_rows"],
-            x_vals=[128 * i for i in range(8, 40, 4)],
+            x_vals=[128 * i for i in range(8, 30, 4)],
             line_arg="provider",
-            line_vals=["torch", "triton"],
-            line_names=["PyTorch", "Triton"],
-            styles=[("green", "-"), ("blue", "-")],
+            line_vals=["aihwkit", "lightning", "triton"],
+            line_names=["AIHWKIT", "AIHWKIT-Lightning", "Triton"],
+            styles=[("green", "-"), ("blue", "-"), ("red", "-")],
             ylabel="Time [ms]",
             plot_name="linear performance fwd",
-            args={},
+            args={"max_input_size": max_input_size},
         )
     )
-    def layer_benchmark(n_cols: int, n_rows: int, provider: str):
+    def layer_benchmark(n_cols: int, n_rows: int, provider: str, max_input_size: int):
         """
         Benchmark the linear layer.
 
@@ -364,14 +388,19 @@ def benchmark_triton_implementation():
             Tuple[float]: Median, min, max of the runtimes in ms
         """
         quantiles = [0.5, 0.2, 0.8]
-        bsz = 1024
+        bsz = 512
         dtype = float16
         device = torch_device("cuda" if torch_cuda.is_available() else "cpu")
         assert device == torch_device("cuda"), "Running this on a CPU is not recommended."
-        rpu_config, _ = gen_rpu(
-            ir_enable=True, weight_noise_enable=True, clip_enable=False, out_noise_enable=False
+        rpu_config, aihwkit_rpu_config = gen_rpu(
+            ir_enable=True,
+            weight_noise_enable=True,
+            clip_enable=True,
+            out_noise_enable=False,
+            adc_enable=False,
         )
-        rpu_config.mapping.max_input_size = 512
+        rpu_config.mapping.max_input_size = max_input_size
+        aihwkit_rpu_config.mapping.max_input_size = max_input_size
 
         layer = AnalogLinear(
             in_features=n_rows,
@@ -381,23 +410,41 @@ def benchmark_triton_implementation():
             device=device,
             dtype=dtype,
         )
-        inp = randn(bsz, n_rows, device=device, dtype=dtype, requires_grad=True)
-        use_triton = provider == "triton"
-        if use_triton:
-            os.environ["AIHWKIT_USE_TRITON"] = "1"
-        time_ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: bench(layer, inp), quantiles=quantiles
+        lightning_optim = AnalogOptimizer(AdamW, layer.analog_layers(), layer.parameters(), lr=0.0)
+        aihwkit_layer = AIHWKITAnalogLinear(
+            in_features=n_rows, out_features=n_cols, bias=False, rpu_config=aihwkit_rpu_config
         )
-        if use_triton:
+        aihwkit_layer = aihwkit_layer.to(dtype=dtype, device=device)
+
+        class AihwkitAnalogAdamW(AnalogOptimizerMixin, AdamW):
+            """AIHWKIT AdamW optimizer."""
+
+        aihwkit_optim = AihwkitAnalogAdamW(aihwkit_layer.parameters(), lr=0.0)
+
+        inp = randn(bsz, n_rows, device=device, dtype=dtype, requires_grad=True)
+        if provider == "triton":
+            os.environ["AIHWKIT_USE_TRITON"] = "1"
+            time_ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: bench(layer, inp, lightning_optim), quantiles=quantiles
+            )
             del os.environ["AIHWKIT_USE_TRITON"]
-        print(f"{provider}: Linear layer shape {n_rows} x {n_cols} time {time_ms}")
+        elif provider == "aihwkit":
+            time_ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: bench(aihwkit_layer, inp, aihwkit_optim), quantiles=quantiles
+            )
+        elif provider == "lightning":
+            time_ms, min_ms, max_ms = triton.testing.do_bench(
+                lambda: bench(layer, inp, lightning_optim), quantiles=quantiles
+            )
         return time_ms, max_ms, min_ms
 
     layer_benchmark.run(
-        print_data=True, save_path="debug/linear_performance_fwd_bwd_torch_vs_triton"
+        print_data=True,
+        save_path=f"debug/linear_performance_fwd_bwd_torch_vs_triton_max_input_size_{max_input_size}",
     )
 
 
 if __name__ == "__main__":
-    benchmark_triton_implementation()
+    benchmark_triton_implementation(max_input_size=-1)
+    benchmark_triton_implementation(max_input_size=512)
     benchmark_aihwkit_lightning()

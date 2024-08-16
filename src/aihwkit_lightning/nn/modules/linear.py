@@ -111,6 +111,12 @@ class AnalogLinear(Linear, AnalogLayerBase):
         if apply_weight_modifier:
             modified_weights = self.weight.clone()
 
+        apply_out_quantization = self.rpu_config.forward.out_res > 0
+        if apply_out_quantization:
+            assert self.rpu_config.forward.out_bound > 0, "Out quant. without a bound."
+            assert self.rpu_config.pre_post.input_range.enable, "Out quant. without IR."
+        # apply_out_quantization entails out_bound > 0
+
         triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
         if triton_enabled and not TRITON_AVAIL:
             warning("AIHWKIT_USE_TRITON is set, but triton is not installed")
@@ -141,6 +147,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
             self.training,
             self.rpu_config,
             apply_weight_modifier,
+            apply_out_quantization,
         )
         return out
 
