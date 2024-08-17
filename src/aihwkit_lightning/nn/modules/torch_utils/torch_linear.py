@@ -244,7 +244,9 @@ class TorchLinear:
 
             # maybe do some quantization
             if rpu_config.forward.inp_res > 0:
-                inp_slice = UniformQuantize.apply(inp_slice, rpu_config.forward.inp_res, input_range[slice_idx], True)
+                inp_slice = UniformQuantize.apply(
+                    inp_slice, rpu_config.forward.inp_res, input_range[slice_idx], True
+                )
 
             # do we meed assumed_wmax per-column or per-tensor? or not at all?
             need_assumed_wmax = False
@@ -313,16 +315,22 @@ class TorchLinear:
                     )
                     out_noise = (
                         wmax
-                        * (rpu_config.forward.out_noise
-                        / sqrt(len(in_sizes)) * input_range[slice_idx])
+                        * (
+                            rpu_config.forward.out_noise
+                            / sqrt(len(in_sizes))
+                            * input_range[slice_idx]
+                        )
                         * randn_like(out_slice)
                     )
                 out_slice += out_noise
 
             if rpu_config.forward.out_bound > 0 or apply_out_quantization:
-                bound = rpu_config.forward.out_bound * assumed_wmax.view(
-                    1, -1
-                ) * input_range[slice_idx]  # type: ignore[union-attr]
+                with no_grad():
+                    bound = (
+                        input_range[slice_idx] * rpu_config.forward.out_bound
+                    ) * assumed_wmax.view(
+                        1, -1
+                    )  # type: ignore[union-attr]
                 if apply_out_quantization:
                     out_slice = UniformQuantize.apply(
                         out_slice, rpu_config.forward.out_res, bound, True
@@ -332,7 +340,7 @@ class TorchLinear:
 
             out += out_slice  # type: ignore[assignment]
             current_upper += inp_size
-            
+
         return out + bias if bias is not None else out
 
     @staticmethod

@@ -194,13 +194,6 @@ def linear_forward_backward_and_step(
     optimizer.step()
 
 
-def lstm_forward_backward_and_step(lstm: LSTM, inp: Tensor, optimizer: Optimizer):
-    """Perform the forward, backward and step operations."""
-    out = lstm(inp)[0]
-    out.sum().backward()
-    optimizer.step()
-
-
 def benchmark_test(stmt, function, inp, optim, num_threads, label, sub_label, description, results):
     """Benchmark function with specified parameters"""
     results.append(
@@ -241,8 +234,7 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
         aihwkit_linear = AIHWKITAnalogLinear(
             in_features=size, out_features=size, bias=True, rpu_config=aihwkit_rpu_config
         )
-        aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
-        aihwkit_linear.analog_module.set_weights(randn((size, size), device=device, dtype=dtype).T)
+        aihwkit_linear.remap_analog_weights()
         aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
 
         class AihwkitAnalogAdamW(AnalogOptimizerMixin, AdamW):
@@ -295,7 +287,11 @@ def benchmark_aihwkit_lightning():
     redirect_print("-------------------------------------")
     redirect_print("----------Nothing turned on----------")
     lightning_rpu_config, aihwkit_rpu_config = gen_rpu(
-        ir_enable=False, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
+        ir_enable=False,
+        weight_noise_enable=False,
+        clip_enable=False,
+        out_noise_enable=False,
+        adc_enable=False,
     )
     benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_config, aihwkit_rpu_config)
     redirect_print("=====================================\n\n")
@@ -303,7 +299,11 @@ def benchmark_aihwkit_lightning():
     redirect_print("--------------------------------------")
     redirect_print("---------------Clipping---------------")
     lightning_rpu_clip, aihwkit_rpu_clip = gen_rpu(
-        ir_enable=False, weight_noise_enable=False, clip_enable=True, out_noise_enable=False, adc_enable=False
+        ir_enable=False,
+        weight_noise_enable=False,
+        clip_enable=True,
+        out_noise_enable=False,
+        adc_enable=False,
     )
     benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_clip, aihwkit_rpu_clip)
     redirect_print("======================================\n\n")
@@ -311,7 +311,11 @@ def benchmark_aihwkit_lightning():
     redirect_print("-----------------------------------------")
     redirect_print("---------------WeightNoise---------------")
     lightning_rpu_weight_noise, aihwkit_rpu_weight_noise = gen_rpu(
-        ir_enable=False, weight_noise_enable=True, clip_enable=False, out_noise_enable=False, adc_enable=False
+        ir_enable=False,
+        weight_noise_enable=True,
+        clip_enable=False,
+        out_noise_enable=False,
+        adc_enable=False,
     )
     benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
         lightning_rpu_weight_noise, aihwkit_rpu_weight_noise
@@ -321,7 +325,11 @@ def benchmark_aihwkit_lightning():
     redirect_print("--------------------------------")
     redirect_print("---------------IR---------------")
     lightning_rpu_ir, aihwkit_rpu_ir = gen_rpu(
-        ir_enable=True, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
+        ir_enable=True,
+        weight_noise_enable=False,
+        clip_enable=False,
+        out_noise_enable=False,
+        adc_enable=False,
     )
     benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_ir, aihwkit_rpu_ir)
     redirect_print("================================\n\n")
@@ -353,7 +361,7 @@ def benchmark_triton_implementation(max_input_size: int):
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=["n_cols", "n_rows"],
-            x_vals=[128 * i for i in range(8, 30, 4)],
+            x_vals=[128 * i for i in range(8, 40, 4)],
             line_arg="provider",
             line_vals=["aihwkit", "lightning", "triton"],
             line_names=["AIHWKIT", "AIHWKIT-Lightning", "Triton"],
@@ -402,6 +410,7 @@ def benchmark_triton_implementation(max_input_size: int):
         aihwkit_layer = AIHWKITAnalogLinear(
             in_features=n_rows, out_features=n_cols, bias=False, rpu_config=aihwkit_rpu_config
         )
+        aihwkit_layer.remap_analog_weights()
         aihwkit_layer = aihwkit_layer.to(dtype=dtype, device=device)
 
         class AihwkitAnalogAdamW(AnalogOptimizerMixin, AdamW):
