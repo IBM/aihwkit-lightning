@@ -48,3 +48,13 @@ class IOParameters(_PrintableMixin):
     (:math:`\sigma_\text{out}`) at each output, i.e. noisiness of
     device summation at the output.
     """
+
+    out_bound: float = 0.0
+    """Output bound and ranges for analog-to-digital converter (ADC)."""
+
+    out_res: float = -1
+    """Number of discretization steps for ADC or resolution.
+
+    Number of discretization steps for ADC (:math:`<=0` means infinite steps).
+    Example: 8 bits is :math:`1 / (2**8 - 2)` or :math:`(2**8 - 2)`.
+    """

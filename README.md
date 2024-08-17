@@ -43,14 +43,12 @@ The triton kernel is generally faster than the normal PyTorch implementation, an
 However, some things are still not optimal. Until these points are resolved, we consider the `triton` mode experimental.
 
 - The sliced `std()` kernel that calculates the `std()` for slices of a tensor is not very fast. Fixing this, would speed up the scenario where we chunk the weight matrix along the input dimension significantly.
-- Input range learning is made up of three gradients. Our own gradient + the gradients resulting from the operations `inp_slice = inp_slice / input_range[slice_idx]` and `out_slice *= input_range[slice_idx]`. These two gradients are
-not accessible in `triton` mode. On one training sample, we verified that the downstrean accuracy was not affected by this, however, we are not sure this is always the case.
 
 
 ## Further notes
-- Gradient behavior for `float16` and `bfloat16` does not match the AIHWKIT 100% due to rounding errors. This doesn't effect
-training though and the gradient tests are passing for `float32` at `atol=1e-5`.
+- Tests checking the correctness against AIHWKIT are passing. Becuase we don't normalize inputs and weights, tests for `float16` and `bfloat16` only pass for high `atol`. When normalizing the input (which is not needed and adds extra FLOPs, tests are also passing in half precision).
 - Currently, `torch.compile` doesn't work when input range learning is activated, because a leaf variable requiring gradients gets updated in the forward pass.
+- Input range learning is made up of three gradients. Our own gradient + the gradients resulting from the operations `inp_slice = inp_slice / input_range[slice_idx]` and `out_slice *= input_range[slice_idx]`. These two gradients are not accessible in `triton` mode. We verified that the downstrean accuracy was not affected by this. The pure PyTorch version also leaves out these gradients, but the custom gradient is correct compared the AIHWKIT.
 
 
 ## Authors

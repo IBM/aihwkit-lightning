@@ -17,7 +17,11 @@ from math import sqrt
 from torch import Tensor, randn_like, clamp, zeros_like
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightModifierType
+from aihwkit_lightning.simulator.configs import (
+    TorchInferenceRPUConfig,
+    WeightModifierType,
+    WeightClipType,
+)
 from aihwkit_lightning.exceptions import ConfigError
 
 
@@ -27,28 +31,39 @@ class UniformQuantize(Function):
     # pylint: disable=abstract-method, redefined-builtin, arguments-differ
 
     @staticmethod
-    def forward(ctx: FunctionCtx, inp: Tensor, res: float, inplace: bool) -> Tensor:
+    def forward(
+        ctx: FunctionCtx,
+        inp: Tensor,
+        res: Union[Tensor, float, int],
+        bound: Union[float, Tensor],
+        inplace: bool,
+    ) -> Tensor:
         """Quantizes the input tensor and performs straight-through estimation.
 
         Args:
             ctx (FunctionCtx): Context.
             inp (torch.Tensor): Input to be discretized.
-            res (float): Resolution (number of states).
+            res (Tensor, float, int): Resolution (number of states).
+            bound (Tensor, float, int): Output bound.
             inplace (bool): Clone the input?
 
         Returns:
             torch.Tensor: Quantized input.
         """
         # - Compute 1 / states if the number of states are provided
-        if isinstance(res, Tensor):
-            if res.ndim > 1:
-                # pylint: disable=line-too-long
-                err_string = f"res is tensor but first dim {res.size(0)} mismatches with first dim of input: {inp.size(0)}"  # noqa: E501
-                assert res.size(0) == inp.size(0), err_string
-            res = 2 / res if (res > 1.0).all() else 2 * res
-            assert (res > 0).all(), "resolution is <= 0"
+        alpha = 2 * bound
+        if isinstance(res, Tensor) or isinstance(alpha, Tensor):
+            if isinstance(res, (int, float)):
+                res = alpha / res if res > 1.0 else alpha * res
+            else:
+                if res.ndim > 1:
+                    # pylint: disable=line-too-long
+                    err_string = f"res is tensor but first dim {res.size(0)} mismatches with first dim of input: {inp.size(0)}"  # noqa: E501
+                    assert res.size(0) == inp.size(0), err_string
+                res = alpha / res if (res > 1.0).all() else alpha * res
+                assert (res > 0).all(), "resolution is <= 0"
         else:
-            res = 2 / res if res > 1.0 else 2 * res
+            res = alpha / res if res > 1.0 else alpha * res
             assert res > 0, "resolution is <= 0"
         output = inp if inplace else inp.clone()
         output = output / res
@@ -67,7 +82,7 @@ class UniformQuantize(Function):
 
     @staticmethod
     # type: ignore[override]
-    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, None, None, None]:
+    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, None, None, None, None]:
         """Straight-through estimator.
 
         Args:
@@ -79,7 +94,7 @@ class UniformQuantize(Function):
         """
         # - Straight-through estimator
         grad_input = grad_output
-        return grad_input, None, None, None
+        return grad_input, None, None, None, None
 
 
 class StraightThroughClamp(Function):
@@ -138,11 +153,6 @@ class InputRangeForward(Function):
         ctx: FunctionCtx, d_output: Tensor
     ) -> Tuple[Tensor, Tensor, None, None, None, None]:
 
-        # # DEBUG
-        # import pydevd
-
-        # pydevd.settrace(suspend=False, trace_only_current_thread=True)
-
         upper_thresh: Tensor
         lower_thresh: Tensor
         input_range: Tensor
@@ -186,6 +196,7 @@ class TorchLinear:
         training: bool,
         rpu_config: TorchInferenceRPUConfig,
         apply_weight_modifier: bool,
+        apply_out_quantization: bool,
     ):
         """Forward function for the linear layer. Performs x @ W^T + b."""
         current_upper = 0
@@ -212,7 +223,6 @@ class TorchLinear:
                         x_max=x_max,
                         update_from_data=training,
                     )
-                    inp_slice = inp_slice / input_range[slice_idx]
                 else:
                     inp_slice, upper_thresh, lower_thresh = TorchLinear.apply_input_range(
                         values=inp_slice,
@@ -232,16 +242,20 @@ class TorchLinear:
                         rpu_config.pre_post.input_range.input_min_percentage,
                     )
 
-                    inp_slice = inp_slice / input_range[slice_idx]
-
             # maybe do some quantization
             if rpu_config.forward.inp_res > 0:
-                inp_slice = UniformQuantize.apply(inp_slice, rpu_config.forward.inp_res, False)
+                inp_slice = UniformQuantize.apply(
+                    inp_slice, rpu_config.forward.inp_res, input_range[slice_idx], True
+                )
 
             # do we meed assumed_wmax per-column or per-tensor? or not at all?
             need_assumed_wmax = False
             need_assumed_wmax_per_channel = False
             reduce_assumed_wmax_for_weight_modifier = False
+            if apply_out_quantization or rpu_config.forward.out_bound > 0:
+                need_assumed_wmax = True
+                if rpu_config.clip.type == WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL:
+                    need_assumed_wmax_per_channel = True
             if training and rpu_config.forward.out_noise > 0:
                 need_assumed_wmax = True
                 if rpu_config.forward.out_noise_per_channel:
@@ -301,21 +315,32 @@ class TorchLinear:
                     )
                     out_noise = (
                         wmax
-                        * rpu_config.forward.out_noise
-                        / sqrt(len(in_sizes))
+                        * (
+                            rpu_config.forward.out_noise
+                            / sqrt(len(in_sizes))
+                            * input_range[slice_idx]
+                        )
                         * randn_like(out_slice)
                     )
                 out_slice += out_noise
 
-            if rpu_config.pre_post.input_range.enable:
-                assert input_range is not None, "Input range must be provided"
-                out_slice *= input_range[slice_idx]
+            if rpu_config.forward.out_bound > 0 or apply_out_quantization:
+                with no_grad():
+                    bound = (
+                        input_range[slice_idx] * rpu_config.forward.out_bound
+                    ) * assumed_wmax.view(
+                        1, -1
+                    )  # type: ignore[union-attr]
+                if apply_out_quantization:
+                    out_slice = UniformQuantize.apply(
+                        out_slice, rpu_config.forward.out_res, bound, True
+                    )
+                if rpu_config.forward.out_bound > 0:
+                    out_slice = clamp(out_slice, min=-bound, max=bound)
 
             out += out_slice  # type: ignore[assignment]
-
             current_upper += inp_size
 
-        out = out.to(dtype=weights.dtype)  # type: ignore[attr-defined]
         return out + bias if bias is not None else out
 
     @staticmethod
@@ -461,7 +486,7 @@ class TorchLinear:
             WeightModifierType.DISCRETIZE_PER_CHANNEL,
         ]:
             # - Discretize the weights on the fly and backprob through them
-            inp_weight = UniformQuantize.apply(inp_weight, res, True)
+            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, True)
         elif modifier.type in [
             WeightModifierType.ADD_NORMAL,
             WeightModifierType.ADD_NORMAL_PER_CHANNEL,
@@ -473,7 +498,7 @@ class TorchLinear:
             WeightModifierType.DISCRETIZE_ADD_NORMAL,
             WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
         ]:
-            inp_weight = UniformQuantize.apply(inp_weight, res, True)
+            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, True)
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise

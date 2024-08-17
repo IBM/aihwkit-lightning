@@ -215,6 +215,12 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         if apply_weight_modifier:
             modified_weights = self.weight.clone()
 
+        apply_out_quantization = self.rpu_config.forward.out_res > 0
+        if apply_out_quantization:
+            assert self.rpu_config.forward.out_bound > 0, "Out quant. without a bound."
+            assert self.rpu_config.pre_post.input_range.enable, "Out quant. without IR."
+        # apply_out_quantization entails out_bound > 0
+
         im_shape = x_input.shape
         assert isinstance(self.padding, tuple), "Padding must be a tuple"
         x_input_ = (
@@ -257,6 +263,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 training=self.training,
                 rpu_config=self.rpu_config,
                 apply_weight_modifier=apply_weight_modifier,
+                apply_out_quantization=apply_out_quantization,
             )
 
         out = out.transpose(-1, -2).contiguous()
