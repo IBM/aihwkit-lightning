@@ -153,11 +153,6 @@ class InputRangeForward(Function):
         ctx: FunctionCtx, d_output: Tensor
     ) -> Tuple[Tensor, Tensor, None, None, None, None]:
 
-        # # DEBUG
-        # import pydevd
-
-        # pydevd.settrace(suspend=False, trace_only_current_thread=True)
-
         upper_thresh: Tensor
         lower_thresh: Tensor
         input_range: Tensor
@@ -228,7 +223,6 @@ class TorchLinear:
                         x_max=x_max,
                         update_from_data=training,
                     )
-                    inp_slice = inp_slice / input_range[slice_idx]
                 else:
                     inp_slice, upper_thresh, lower_thresh = TorchLinear.apply_input_range(
                         values=inp_slice,
@@ -248,11 +242,9 @@ class TorchLinear:
                         rpu_config.pre_post.input_range.input_min_percentage,
                     )
 
-                    inp_slice = inp_slice / input_range[slice_idx]
-
             # maybe do some quantization
             if rpu_config.forward.inp_res > 0:
-                inp_slice = UniformQuantize.apply(inp_slice, rpu_config.forward.inp_res, 1.0, True)
+                inp_slice = UniformQuantize.apply(inp_slice, rpu_config.forward.inp_res, input_range[slice_idx], True)
 
             # do we meed assumed_wmax per-column or per-tensor? or not at all?
             need_assumed_wmax = False
@@ -321,18 +313,16 @@ class TorchLinear:
                     )
                     out_noise = (
                         wmax
-                        * rpu_config.forward.out_noise
-                        / sqrt(len(in_sizes))
+                        * (rpu_config.forward.out_noise
+                        / sqrt(len(in_sizes)) * input_range[slice_idx])
                         * randn_like(out_slice)
                     )
                 out_slice += out_noise
 
-            # ADC here. MVM domain is I_[-1,1] * W_fp
-            # TODO Can't we always do it in I_fp * W_fp?
             if rpu_config.forward.out_bound > 0 or apply_out_quantization:
                 bound = rpu_config.forward.out_bound * assumed_wmax.view(
                     1, -1
-                )  # type: ignore[union-attr]
+                ) * input_range[slice_idx]  # type: ignore[union-attr]
                 if apply_out_quantization:
                     out_slice = UniformQuantize.apply(
                         out_slice, rpu_config.forward.out_res, bound, True
@@ -340,15 +330,9 @@ class TorchLinear:
                 if rpu_config.forward.out_bound > 0:
                     out_slice = clamp(out_slice, min=-bound, max=bound)
 
-            if rpu_config.pre_post.input_range.enable:
-                assert input_range is not None, "Input range must be provided"
-                out_slice *= input_range[slice_idx]
-
             out += out_slice  # type: ignore[assignment]
-
             current_upper += inp_size
-
-        out = out.to(dtype=weights.dtype)  # type: ignore[attr-defined]
+            
         return out + bias if bias is not None else out
 
     @staticmethod

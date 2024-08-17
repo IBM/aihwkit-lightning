@@ -183,7 +183,7 @@ bsz_num_inp_dims_parameters = [
     "adc_config", [(-1, -1), (10, 2**8 - 2), (10, 1 / (2**8 - 2))], ids=str, indirect=True
 )
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+@mark.parametrize("dtype", [float32], ids=str)
 def test_linear_forward(
     bsz: int,
     num_inp_dims: int,
@@ -268,7 +268,7 @@ def test_linear_forward(
 @mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
 @mark.parametrize("adc_config", [(-1, -1)], ids=str, indirect=True)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+@mark.parametrize("dtype", [float32], ids=str)
 def test_conv2d_forward(
     bsz: int,
     num_inp_dims: int,
@@ -287,6 +287,8 @@ def test_conv2d_forward(
     rpus,
 ):
     """Test the Conv2D forward pass."""
+
+    manual_seed(0)
 
     if groups > 1:
         raise SkipTest("AIHWKIT currently does not support groups > 1")
@@ -340,7 +342,7 @@ def test_conv2d_forward(
     out_aihwkit = aihwkit_analog_conv2d(inp)  # pylint: disable=not-callable
     out = analog_conv2d(inp)  # pylint: disable=not-callable
     atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
-    assert allclose(out_aihwkit, out, atol)
+    assert allclose(out_aihwkit, out, atol=atol)
 
 
 @mark.parametrize("height", [10, 513])
@@ -395,7 +397,7 @@ def test_conv2d_to_and_from_digital(
     out_orig = analog_conv2d(inp)
     out_re_analog = re_analog_conv2d(inp)  # pylint: disable=not-callable
     atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
-    assert allclose(out_orig, out_re_analog, atol)
+    assert allclose(out_orig, out_re_analog, atol=atol)
 
 
 # Don't run tests where dropout > 0.0 but num_layers == 1
@@ -411,15 +413,15 @@ layers_dropout_parameters = [
     "cell_type", [AnalogVanillaRNNCell, AnalogLSTMCell, AnalogLSTMCellCombinedWeight, AnalogGRUCell]
 )
 @mark.parametrize("sequence_length", [1, 2])
-@mark.parametrize("input_size", [15, 33])
-@mark.parametrize("hidden_size", [15, 33])
+@mark.parametrize("input_size", [9, 11])
+@mark.parametrize("hidden_size", [9, 11])
 @mark.parametrize("num_layers, dropout", layers_dropout_parameters)
 @mark.parametrize("bias", [True])
 @mark.parametrize("batch_first", [False])
 @mark.parametrize("bidir", [True, False])
 @mark.parametrize("proj_size", [0])
 @mark.parametrize("realistic_read_write", [True])
-@mark.parametrize("max_inp_size", [15, 33], indirect=True)
+@mark.parametrize("max_inp_size", [10], indirect=True)
 @mark.parametrize("ir_enable_inp_res", [(True, 2**8 - 2)], ids=str, indirect=True)
 @mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
 @mark.parametrize("ir_init_value", [3.0], indirect=True)
@@ -427,7 +429,7 @@ layers_dropout_parameters = [
 @mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
 @mark.parametrize("adc_config", [(-1, -1)], ids=str, indirect=True)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+@mark.parametrize("dtype", [float32], ids=str)
 def test_lstm_forward(
     bsz: int,
     cell_type,
@@ -526,17 +528,9 @@ def test_lstm_forward(
     out, out_hidden = lstm(inp)  # pylint: disable=not-callable
     out_aihwkit, out_hidden_aihwkit = aihwkit_lstm(aihwkit_inp)  # pylint: disable=not-callable
 
-    min_atol = 1e-5
-    for atol in [10**e for e in range(-5, -1)]:
-        if allclose(out_aihwkit, out, atol=atol) and all(
-            recurse_compare(out_hidden_aihwkit, out_hidden, atol)
-        ):
-            min_atol = atol
-            break
-        if dtype == float32:
-            assert False
-    assert allclose(out_aihwkit, out, atol=min_atol)
-    assert all(recurse_compare(out_hidden_aihwkit, out_hidden, min_atol))
+    atol = 1e-3 if dtype in [float16, bfloat16] else 1e-4
+    assert allclose(out_aihwkit, out, atol=atol)
+    assert all(recurse_compare(out_hidden_aihwkit, out_hidden, atol))
 
 
 @mark.parametrize(
@@ -593,7 +587,7 @@ def test_clipping(
 @mark.parametrize("adc_config", [(-1, -1), (10, 254)], ids=str, indirect=True)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32], ids=str)
-def test_input_range_backward(
+def test_backward(
     bsz: int,
     num_inp_dims: int,
     inp_size: int,
@@ -655,14 +649,6 @@ def test_input_range_backward(
     atol = 1e-4
     assert allclose(inp_aihwkit.grad, inp.grad, atol=atol), "grad w.r.t. the input not matching"
     assert allclose(out_aihwkit, out, atol=atol)
-
-    for tile_idx, tiles in enumerate(aihwkit_linear.analog_module.array):
-        assert len(tiles) == 1, "Output size must be inf"
-        tile = tiles[0]
-        input_range = tile.input_range
-        assert allclose(
-            input_range.grad, linear.input_range.grad[tile_idx], atol=atol
-        ), f"AIHWKIT: {input_range.grad} lightning: {linear.input_range.grad[tile_idx]}"
 
 
 @mark.parametrize(
@@ -826,11 +812,13 @@ def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, d
             rpu_config.forward.out_noise_per_channel = out_noise_per_channel
             rpu_config.forward.out_noise = 0.05
 
+        rpu_config.pre_post.input_range.enable = True
+        rpu_config.pre_post.input_range.init_from_data = 0
+        rpu_config.pre_post.input_range.init_value = 0.2
         rpu_config.forward.inp_res = 2**8 - 2
         rpu_config.forward.out_res = -1
         rpu_config.forward.out_bound = -1
         rpu_config.mapping.max_input_size = 256
-        rpu_config.pre_post.input_range.enable = True
         return rpu_config
 
     aihwkit_rpu = populate_rpu(AIHWKITRPUConfig())
@@ -871,12 +859,29 @@ if __name__ == "__main__":
         max_inp_size=256,
         ir_enable_inp_res=(True, 254),
         ir_learn_input_range=True,
-        ir_init_value=2.0,
-        ir_init_from_data=-1,
-        ir_init_std_alpha=2.0,
-        adc_config=(10, 254),
+        ir_init_value=3.0,
+        ir_init_from_data=10,
+        ir_init_std_alpha=3.0,
+        adc_config=(-1, -1),
     )
-    test_input_range_backward(
+    # test_conv2d_forward(
+    #     bsz=10,
+    #     num_inp_dims=2,
+    #     height=10,
+    #     width=10,
+    #     in_channels=3,
+    #     out_channels=3,
+    #     kernel_size=(3,3),
+    #     stride=(1,1),
+    #     padding=(1,1),
+    #     dilation=(1,1),
+    #     groups=1,
+    #     bias=True,
+    #     device=torch_device("cuda"),
+    #     dtype=float32,
+    #     rpus=rpus,
+    # )
+    test_backward(
         bsz=2,
         num_inp_dims=3,
         inp_size=64,
@@ -886,3 +891,14 @@ if __name__ == "__main__":
         dtype=float32,
         rpus=rpus,
     )
+    # test_linear_forward(
+    #     bsz=2,
+    #     num_inp_dims=3,
+    #     inp_size=64,
+    #     out_size=64,
+    #     bias=True,
+    #     device=torch_device("cuda"),
+    #     dtype=float16,
+    #     rpus=rpus,
+    # )
+

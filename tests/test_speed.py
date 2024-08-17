@@ -292,39 +292,39 @@ def benchmark_aihwkit_lightning():
     """Benchmark the speed of the fwd bwd step for differenet rpu-configs."""
 
     os.makedirs("debug/benchmarks", exist_ok=True)
-    # redirect_print("-------------------------------------")
-    # redirect_print("----------Nothing turned on----------")
-    # lightning_rpu_config, aihwkit_rpu_config = gen_rpu(
-    #     ir_enable=False, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
-    # )
-    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_config, aihwkit_rpu_config)
-    # redirect_print("=====================================\n\n")
+    redirect_print("-------------------------------------")
+    redirect_print("----------Nothing turned on----------")
+    lightning_rpu_config, aihwkit_rpu_config = gen_rpu(
+        ir_enable=False, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
+    )
+    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_config, aihwkit_rpu_config)
+    redirect_print("=====================================\n\n")
 
-    # redirect_print("--------------------------------------")
-    # redirect_print("---------------Clipping---------------")
-    # lightning_rpu_clip, aihwkit_rpu_clip = gen_rpu(
-    #     ir_enable=False, weight_noise_enable=False, clip_enable=True, out_noise_enable=False, adc_enable=False
-    # )
-    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_clip, aihwkit_rpu_clip)
-    # redirect_print("======================================\n\n")
+    redirect_print("--------------------------------------")
+    redirect_print("---------------Clipping---------------")
+    lightning_rpu_clip, aihwkit_rpu_clip = gen_rpu(
+        ir_enable=False, weight_noise_enable=False, clip_enable=True, out_noise_enable=False, adc_enable=False
+    )
+    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_clip, aihwkit_rpu_clip)
+    redirect_print("======================================\n\n")
 
-    # redirect_print("-----------------------------------------")
-    # redirect_print("---------------WeightNoise---------------")
-    # lightning_rpu_weight_noise, aihwkit_rpu_weight_noise = gen_rpu(
-    #     ir_enable=False, weight_noise_enable=True, clip_enable=False, out_noise_enable=False, adc_enable=False
-    # )
-    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
-    #     lightning_rpu_weight_noise, aihwkit_rpu_weight_noise
-    # )
-    # redirect_print("=========================================\n\n")
+    redirect_print("-----------------------------------------")
+    redirect_print("---------------WeightNoise---------------")
+    lightning_rpu_weight_noise, aihwkit_rpu_weight_noise = gen_rpu(
+        ir_enable=False, weight_noise_enable=True, clip_enable=False, out_noise_enable=False, adc_enable=False
+    )
+    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
+        lightning_rpu_weight_noise, aihwkit_rpu_weight_noise
+    )
+    redirect_print("=========================================\n\n")
 
-    # redirect_print("--------------------------------")
-    # redirect_print("---------------IR---------------")
-    # lightning_rpu_ir, aihwkit_rpu_ir = gen_rpu(
-    #     ir_enable=True, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
-    # )
-    # benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_ir, aihwkit_rpu_ir)
-    # redirect_print("================================\n\n")
+    redirect_print("--------------------------------")
+    redirect_print("---------------IR---------------")
+    lightning_rpu_ir, aihwkit_rpu_ir = gen_rpu(
+        ir_enable=True, weight_noise_enable=False, clip_enable=False, out_noise_enable=False, adc_enable=False
+    )
+    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_ir, aihwkit_rpu_ir)
+    redirect_print("================================\n\n")
 
     redirect_print("-----------------------------------------------------")
     redirect_print("---------------Clipping+WeightNoise+IR---------------")
@@ -333,18 +333,6 @@ def benchmark_aihwkit_lightning():
         weight_noise_enable=True,
         clip_enable=True,
         out_noise_enable=False,
-        adc_enable=False,
-    )
-    benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
-    redirect_print("=====================================================")
-
-    redirect_print("-----------------------------------------------------")
-    redirect_print("---------------Clipping+WeightNoise+IR+OutNoise------")
-    lightning_rpu_all, aihwkit_rpu_all = gen_rpu(
-        ir_enable=True,
-        weight_noise_enable=True,
-        clip_enable=True,
-        out_noise_enable=True,
         adc_enable=False,
     )
     benchmark_linear_speed_and_peak_memory_of_fwd_bwd(lightning_rpu_all, aihwkit_rpu_all)
