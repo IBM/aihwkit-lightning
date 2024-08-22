@@ -25,7 +25,7 @@ from torch import cuda as torch_cuda
 from torch import randn, float32, float16, bfloat16, Tensor
 from torch import compile as torch_compile
 from torch.optim import Optimizer, AdamW
-from torch.nn import Linear, LSTM
+from torch.nn import Linear
 from torch.utils import benchmark
 
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
@@ -138,8 +138,12 @@ def gen_rpu(
     adc_enable: bool,
 ):
     """Generate the RPU configuration."""
+    is_perfect = False
+    if not (ir_enable or weight_noise_enable or out_noise_enable):
+        is_perfect = True
 
     def rpu(rpu_config: Union[AIHWKITRPUConfig, RPUConfig]):
+        rpu_config.forward.is_perfect = is_perfect
         rpu_config.mapping.max_input_size = -1
         rpu_config.forward.inp_res = 254 if ir_enable else -1
         rpu_config.forward.out_res = 254 if adc_enable else -1
@@ -152,13 +156,13 @@ def gen_rpu(
         rpu_config.modifier.std_dev = 0.01
 
         if isinstance(rpu_config, AIHWKITRPUConfig):
-            rpu_config.forward.is_perfect = not ir_enable
+            rpu_config.forward.is_perfect = is_perfect
             rpu_config.mapping.max_output_size = -1
             rpu_config.mapping.learn_out_scaling = False
             rpu_config.mapping.weight_scaling_omega = 1.0
             rpu_config.mapping.weight_scaling_columnwise = False
             rpu_config.mapping.out_scaling_columnwise = False
-            rpu_config.forward.noise_management = NoiseManagementType.NONE
+            rpu_config.forward.noise_management = NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
             rpu_config.forward.bound_management = BoundManagementType.NONE
             rpu_config.remap.type = WeightRemapType.LAYERWISE_SYMMETRIC
 
@@ -445,3 +449,4 @@ if __name__ == "__main__":
     benchmark_triton_implementation(max_input_size=-1)
     benchmark_triton_implementation(max_input_size=512)
     benchmark_aihwkit_lightning()
+
