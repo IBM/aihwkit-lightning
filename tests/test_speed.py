@@ -162,7 +162,9 @@ def gen_rpu(
             rpu_config.mapping.weight_scaling_omega = 1.0
             rpu_config.mapping.weight_scaling_columnwise = False
             rpu_config.mapping.out_scaling_columnwise = False
-            rpu_config.forward.noise_management = NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
+            rpu_config.forward.noise_management = (
+                NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
+            )
             rpu_config.forward.bound_management = BoundManagementType.NONE
             rpu_config.remap.type = WeightRemapType.LAYERWISE_SYMMETRIC
 
@@ -449,4 +451,3 @@ if __name__ == "__main__":
     benchmark_triton_implementation(max_input_size=-1)
     benchmark_triton_implementation(max_input_size=512)
     benchmark_aihwkit_lightning()
-
