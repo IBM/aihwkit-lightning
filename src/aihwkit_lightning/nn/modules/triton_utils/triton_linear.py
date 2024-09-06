@@ -75,6 +75,7 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
 
     # for random number generation of output
     increase_weight_offsets_by = BLOCK_SIZE_HIDDEN * BLOCK_SIZE_OUT
+    # pylint: disable=assignment-from-no-return, unexpected-keyword-arg
     weight_random_offsets = tl.arange(0, BLOCK_SIZE_HIDDEN * BLOCK_SIZE_OUT).reshape(
         (BLOCK_SIZE_HIDDEN, BLOCK_SIZE_OUT), can_reorder=True
     )

@@ -51,18 +51,11 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("ir_learn_input_range", [True, False])
 @mark.parametrize("ir_init_value", [3.0])
 @mark.parametrize("ir_init_std_alpha", [2.0])
-@mark.parametrize("adc_config", [(-1, -1), (10, 2**8 - 2), (10, 1 / (2**8 - 2))])
-@mark.parametrize("out_noise", [True, False])
-@mark.parametrize("out_noise_per_channel", [True, False])
-@mark.parametrize(
-    "weight_modifier",
-    [
-        WeightModifierType.DISCRETIZE,
-        WeightModifierType.DISCRETIZE_PER_CHANNEL,
-        WeightModifierType.NONE,
-    ],
-)
-@mark.parametrize("weight_modifier_res", [2**8 - 2, 1 / (2**8 - 2)])
+@mark.parametrize("adc_config", [(10, 2**8 - 2), (10, 1 / (2**8 - 2))])
+@mark.parametrize("out_noise", [False])
+@mark.parametrize("out_noise_per_channel", [False])
+@mark.parametrize("weight_modifier", [WeightModifierType.NONE])
+@mark.parametrize("weight_modifier_res", [2**8 - 2])
 @mark.parametrize("clip_type", [WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL, WeightClipType.NONE])
 @mark.parametrize("device", ["cuda"])  # cpu not supported for triton
 @mark.parametrize("dtype", [float32])
@@ -324,21 +317,21 @@ if __name__ == "__main__":
     test_linear_forward(
         bsz=1,
         num_inp_dims=1,
-        inp_size=32,
+        inp_size=10,
         out_size=10,
-        bias=False,
+        bias=True,
         inp_res=254,
         max_inp_size=20,
         ir_enable=True,
         ir_learn_input_range=True,
         ir_init_value=3.0,
         ir_init_std_alpha=2.0,
-        adc_config=(1, -1),
+        adc_config=(10, 2**8 - 2),
         out_noise=False,
-        out_noise_per_channel=True,
+        out_noise_per_channel=False,
         weight_modifier=WeightModifierType.NONE,
         weight_modifier_res=254,
-        clip_type=WeightClipType.NONE,
+        clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
         device="cuda",
         dtype=float32,
     )

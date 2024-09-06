@@ -126,6 +126,7 @@ def get_ds_config(command_args: Namespace) -> dict:
 
 class Net(nn.Module):
     """Define the Convolution Neural Network."""
+
     def __init__(self):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
@@ -263,6 +264,7 @@ def main(args):
     #   2) Distributed data loader.
     #   3) DeepSpeed optimizer.
     ds_config = get_ds_config(args)
+    # pylint: disable=unbalanced-tuple-unpacking
     model_engine, _, trainloader, __ = deepspeed.initialize(
         args=args, model=net, model_parameters=parameters, training_data=trainset, config=ds_config
     )
