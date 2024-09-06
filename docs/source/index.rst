@@ -23,7 +23,7 @@ If you have questions, check out the GitHub |github_icon| repository and/or join
 News
 ----
 
-- **06-09-2024**: AIHWKIT-Lightning v0.1.0 is released!
+- **06-09-2024**: AIHWKIT-Lightning v0.1.0 is released.
 
 
 .. toctree::
