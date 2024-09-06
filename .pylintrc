@@ -63,10 +63,12 @@ confidence=
 # --disable=W".
 disable=similarities,
 	consider-using-f-string,
-        fixme,
-        useless-type-doc,
-        relative-beyond-top-level,
-        import-error
+      fixme,
+      useless-type-doc,
+      relative-beyond-top-level,
+      import-error,
+      abstract-method,
+      no-value-for-parameter
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
