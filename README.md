@@ -14,6 +14,38 @@ pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/
 ```
 
 ## Examples
+
+### Basic Training
+```python
+from torch import Tensor
+from torch.nn.functional import mse_loss
+from torch.optim import SGD
+
+# Import the aihwkit constructs.
+from aihwkit_lightning.nn import AnalogLinear
+from aihwkit_lightning.optim import AnalogOptimizer
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
+
+x = Tensor([[0.1, 0.2, 0.4, 0.3], [0.2, 0.1, 0.1, 0.3]])
+y = Tensor([[1.0, 0.5], [0.7, 0.3]])
+
+# Define a network using a single Analog layer.
+model = AnalogLinear(4, 2, rpu_config=TorchInferenceRPUConfig())
+
+# Use the analog-aware stochastic gradient descent optimizer.
+opt = AnalogOptimizer(SGD, model.analog_layers(), model.parameters(), lr=0.01)
+
+# Train the network.
+for epoch in range(10):
+    pred = model(x)
+    loss = mse_loss(pred, y)
+    loss.backward()
+    opt.step()
+    print(f"Loss error: {loss:.4f}")
+```
+
+### Advanced Training
+
 In the [examples] folder, we have some examples that show how to use the AIHWKIT-Lightning:
 - [DeepSpeed + AIHWKIT-Lightning] shows how to integrate AIHWKIT-Lightning with DeepSpeed.
 - [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning] shows how to do multi-node training of a language model using DeepSpeed, Slurm, Huggingface Accelerate and AIHWKIT-Lightning.
