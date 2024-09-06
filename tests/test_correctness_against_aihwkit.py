@@ -375,7 +375,7 @@ def test_conv2d_to_and_from_digital(
 
     if groups > 1:
         raise SkipTest("AIHWKIT currently does not support groups > 1")
-    
+
     if device == "cpu" and dtype != float32:
         raise SkipTest("Skipping non-float32 tests for CPU")
 
@@ -680,7 +680,7 @@ def test_weight_modifier(
         WeightModifierType.DISCRETIZE_ADD_NORMAL,
     ]:
         raise SkipTest("res but modifier is not discretize")
-    
+
     if device == "cpu" and dtype != float32:
         raise SkipTest("Skipping non-float32 tests for CPU")
 
