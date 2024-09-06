@@ -39,7 +39,10 @@ job_compile_common: &job_compile_common
     - $PYTHON_EXECUTABLE -m pip install -r requirements_dev.txt
     # Install the package in editable mode.
     - VERBOSE=1 $PYTHON_EXECUTABLE -m pip install -v -e .
+    - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ triton-nightly
+
   script:
+    - $PYTHON_EXECUTABLE -c "import triton; print(triton.__version__)"
     - make pytest
 
 build_deploy_common: &build_deploy_common
