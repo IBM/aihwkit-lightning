@@ -37,7 +37,7 @@ job_install_common: &job_install_common
     - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install aihwkit
     - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install -r requirements.txt
     - $PYTHON_EXECUTABLE -m pip install -r requirements_dev.txt
-    - $PYTHON_EXECUTABLE -m pip install pip install types-tqdm
+    - $PYTHON_EXECUTABLE -m pip install types-tqdm
     # Install the package in editable mode.
     - VERBOSE=1 $PYTHON_EXECUTABLE -m pip install -v -e .
     - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ triton-nightly
@@ -71,6 +71,9 @@ jobs:
     stage: Test and lint
     python: "3.10"
     script:
+      - pylint --version
+      - mypy --version
+      - pycodestyle --version
       - make pycodestyle
       - make pylint
       - make mypy
