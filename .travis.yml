@@ -22,7 +22,7 @@ stages:
   - Test multiple python versions
 
 # Parent stage definition, to avoid copy-pasting.
-job_compile_common: &job_compile_common
+job_install_common: &job_install_common
   os: linux
   dist: focal
   language: python
@@ -43,7 +43,6 @@ job_compile_common: &job_compile_common
 
   script:
     - $PYTHON_EXECUTABLE -c "import triton; print(triton.__version__)"
-    - make pytest
 
 build_deploy_common: &build_deploy_common
   deploy:
@@ -59,15 +58,15 @@ build_deploy_common: &build_deploy_common
 
 jobs:
   include:
-  - name: "Compile and test. Python 3.10"
-    <<: *job_compile_common
-    stage: Test and lint
+  - name: "Install and test. Python 3.10"
+    <<: *job_install_common
+    stage: Test
     python: "3.10"
-    env:
-      - TEST_DATASET=true
+    script:
+      - make pytest
 
-  - name: "Compile and lint. Python 3.10"
-    <<: *job_compile_common
+  - name: "Install, pycodestyle, lint, and mypy. Python 3.10"
+    <<: *job_install_common
     stage: Test and lint
     python: "3.10"
     script:
