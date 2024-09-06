@@ -1,6 +1,7 @@
 <img src="docs/assets/cover.png" alt="mamba header image" height="200"/>
 
 # AIHWKIT-Lightning ⚡
+[![Documentation Status](https://readthedocs.org/projects/aihwkit_lightning/badge/?version=latest)](https://aihwkit_lightning.readthedocs.io/en/latest/?badge=latest)
 
 ## Installation
 ```bash
