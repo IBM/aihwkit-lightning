@@ -29,6 +29,7 @@ from aihwkit_lightning.exceptions import ConfigError
 from aihwkit_lightning.simulator.configs import WeightModifierType
 from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
+from aihwkit_lightning.nn.modules.container import AnalogWrapper
 
 # mypy: disable-error-code="attr-defined"
 
@@ -156,7 +157,7 @@ def _calibration_pre_forward(
 
 @no_grad()
 def calibrate_input_ranges(
-    model: Union[AnalogLinear, AnalogConv2d],
+    model: AnalogWrapper,
     calibration_type: InputRangeCalibrationType,
     dataloader: Iterator,
     quantile: float = 0.99995,
