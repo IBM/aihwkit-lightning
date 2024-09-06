@@ -1,3 +1,5 @@
+<img src="docs/assets/cover.png" alt="mamba header image" height="200"/>
+
 # AIHWKIT-Lightning ⚡
 
 ## Installation
