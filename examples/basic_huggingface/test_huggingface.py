@@ -11,7 +11,7 @@
 # that they have been altered from the originals.
 
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
-"""Test huggingface compatibility."""
+"""Example to show huggingface compatibility."""
 
 import tempfile
 import numpy as np
