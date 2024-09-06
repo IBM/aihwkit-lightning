@@ -77,7 +77,7 @@ def test_calibration(
 
     if in_size > 10 and module == AnalogConv2d:
         raise SkipTest("Skipping large input size for Conv2d")
-    
+
     if device == "cpu" and dtype != float32:
         raise SkipTest("Skipping non-float32 tests for CPU")
 
