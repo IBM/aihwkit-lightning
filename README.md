@@ -50,6 +50,7 @@ for epoch in range(10):
 ### Advanced Training
 
 In the [examples] folder, we have some examples that show how to use the AIHWKIT-Lightning:
+- [Huggingface] shows how to train a network with Huggingface and AIHWKIT-Lightning.
 - [DeepSpeed + AIHWKIT-Lightning] shows how to integrate AIHWKIT-Lightning with DeepSpeed.
 - [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning] shows how to do multi-node training of a language model using DeepSpeed, Slurm, Huggingface Accelerate and AIHWKIT-Lightning.
 
@@ -96,5 +97,6 @@ This project is licensed under the [MIT License].
 
 [MIT License]: LICENSE.txt
 [examples]: examples/
+[Huggingface]: examples/basic_huggingface/test_huggingface.py
 [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning]: examples/deepspeed_and_huggingface/
 [DeepSpeed + AIHWKIT-Lightning]: examples/deepspeed_cifar10
