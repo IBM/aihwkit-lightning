@@ -61,9 +61,14 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
     modifier_seed,  # int
     modifier_std: tl.constexpr,  # float
     # block sizes
-    BLOCK_SIZE_HIDDEN: tl.constexpr,
-    BLOCK_SIZE_OUT: tl.constexpr,
+    BLOCK_SIZE_HIDDEN: tl.constexpr,  # pylint: disable=invalid-name
+    BLOCK_SIZE_OUT: tl.constexpr,  # pylint: disable=invalid-name
 ):
+    """
+    Modifier kernel for the weights.
+    """
+    # pylint: disable=too-many-locals
+
     pid = tl.program_id(axis=0)
     offs_bn = (pid * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)) % out_size
     offs_assumed_wmax = pid * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
@@ -82,6 +87,7 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
             + slice_idx * stride_assumed_wmax_num_slices
             + offs_bn * stride_assumed_wmax_out_size
         )
+        # pylint: disable=consider-using-in
         if modifier_type == "AddNormal" or (
             modifier_type == "Discretize" or modifier_type == "DiscretizeAddNormal"
         ):
@@ -104,8 +110,9 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
                 offs_k[:, None] * stride_weights_hidden_size
                 + offs_bn[None, :] * stride_weights_out_size
             )
-            b = tl.load(b_ptrs, mask=offs_k[:, None] < current_upper, other=0.0)
+            weight_block = tl.load(b_ptrs, mask=offs_k[:, None] < current_upper, other=0.0)
 
+            # pylint: disable=consider-using-in
             if (modifier_type == "Discretize" or modifier_type == "DiscretizeAddNormal") or (
                 modifier_type == "DiscretizePerChannel"
                 or modifier_type == "DiscretizeAddNormalPerChannel"
@@ -113,10 +120,11 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
                 if modifier_weight_res > 0:
                     n_states = max(modifier_weight_res, 1 / modifier_weight_res)
                     res = 2 * assumed_wmax_per_slice / n_states
-                    b = b / res
-                    b = tl.extra.cuda.libdevice.rint(b)
-                    b = b * res
+                    weight_block = weight_block / res
+                    weight_block = tl.extra.cuda.libdevice.rint(weight_block)
+                    weight_block = weight_block * res
 
+            # pylint: disable=consider-using-in
             if (modifier_type == "AddNormal" or modifier_type == "AddNormalPerChannel") or (
                 modifier_type == "DiscretizeAddNormal"
                 or modifier_type == "DiscretizeAddNormalPerChannel"
@@ -124,12 +132,12 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
                 randn_block = tl.randn(modifier_seed + pid, weight_random_offsets)
                 weight_random_offsets += increase_weight_offsets_by
                 randn_block = assumed_wmax_per_slice * modifier_std * randn_block
-                b += randn_block
+                weight_block += randn_block
 
-            # store b back to DRAM...
+            # store weight_block back to DRAM...
             tl.store(
                 b_ptrs,
-                b,
+                weight_block,
                 mask=(offs_k[:, None] < current_upper) & (offs_assumed_wmax[None, :] < out_size),
             )
             current_lower = current_upper
@@ -151,7 +159,7 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
     key=["inp_size", "hidden_size", "out_size"],
 )
 @triton.jit
-def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-many-statements
+def matmul_kernel(
     # pointers to tensors
     inp_ptr,  # 2D [inp_size, hidden_size]
     weights_ptr,  # 2D [hidden_size, out_size]
@@ -201,6 +209,9 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
     Can handle different input ranges per slice in the input dimension.
     Stores the MVM result inp_ptr @ weights_ptr in out_ptr.
     """
+
+    # pylint: disable=too-many-arguments, too-many-locals, too-many-statements, too-many-branches
+
     pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(inp_size, BLOCK_SIZE_INP)
     num_pid_n = tl.cdiv(out_size, BLOCK_SIZE_OUT)
@@ -350,7 +361,8 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
         # here, the MVM for the slice was completed. We can apply the ADC
         if out_quant or out_bound > 0:
             # compute the bound
-            bound = bound_scale * out_bound * input_range.to(tl.float32)  # we just scale with abs-max of weight
+            # we just scale with abs-max of weight
+            bound = bound_scale * out_bound * input_range.to(tl.float32)
             if out_quant:
                 alpha = (bound.to(tl.float32) * out_res)
                 per_slice_accumulator = per_slice_accumulator / alpha
@@ -361,8 +373,16 @@ def matmul_kernel(  # pylint: disable=too-many-arguments, too-many-locals, too-m
                 # clip between the input ranges
                 over_out_bound_mask = per_slice_accumulator > bound
                 under_out_bound_mask = per_slice_accumulator < -bound
-                per_slice_accumulator = tl.where(over_out_bound_mask, bound, per_slice_accumulator)
-                per_slice_accumulator = tl.where(under_out_bound_mask, -bound, per_slice_accumulator)
+                per_slice_accumulator = tl.where(
+                    over_out_bound_mask,
+                    bound,
+                    per_slice_accumulator
+                )
+                per_slice_accumulator = tl.where(
+                    under_out_bound_mask,
+                    -bound,
+                    per_slice_accumulator
+                )
 
         accumulator = accumulator + per_slice_accumulator
 
@@ -386,7 +406,7 @@ class TritonLinear(Function):
 
     @staticmethod
     # type: ignore[override]
-    def forward(  # pylint: disable=too-many-locals
+    def forward(  # pylint: disable=too-many-locals, too-many-statements
         ctx: FunctionCtx,
         inp: Tensor,
         weights: Tensor,

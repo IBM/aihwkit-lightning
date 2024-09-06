@@ -57,9 +57,9 @@ You can contact us by opening a new issue in the repository.
 
 
 ## License
-This project is licensed under [Apache License 2.0].
+This project is licensed under the [MIT License].
 
-[Apache License 2.0]: LICENSE.txt
+[MIT License]: LICENSE.txt
 [examples]: examples/
 [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning]: examples/deepspeed_and_huggingface/
 [DeepSpeed + AIHWKIT-Lightning]: examples/deepspeed_cifar10

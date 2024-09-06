@@ -17,16 +17,16 @@
 
 import os
 import argparse
-import torch
-import torch.nn as nn
+from argparse import Namespace
+
+from torch import nn, distributed, utils, no_grad, manual_seed, bfloat16, float16
+from torch import max as torch_max
 import torch.nn.functional as F
-import torchvision
-import torchvision.transforms as transforms
+from torchvision import transforms, datasets
 import deepspeed
 from deepspeed.accelerator import get_accelerator
 from deepspeed.utils import logger
 
-logger.setLevel("WARNING")
 from aihwkit_lightning.nn.conversion import convert_to_analog
 from aihwkit_lightning.simulator.configs import (
     TorchInferenceRPUConfig,
@@ -34,8 +34,11 @@ from aihwkit_lightning.simulator.configs import (
     WeightModifierType,
 )
 
+logger.setLevel("WARNING")
 
-def add_argument():
+
+def add_argument() -> Namespace:
+    """Add the argument parser for the DeepSpeed example."""
     parser = argparse.ArgumentParser(description="CIFAR")
 
     # For train.
@@ -75,16 +78,16 @@ def add_argument():
     # Include DeepSpeed configuration arguments.
     parser = deepspeed.add_config_arguments(parser)
 
-    args = parser.parse_args()
+    parsed_args = parser.parse_args()
 
-    return args
+    return parsed_args
 
 
-def get_ds_config(args):
+def get_ds_config(command_args: Namespace) -> dict:
     """Get the DeepSpeed configuration dictionary."""
     ds_config = {
         "train_batch_size": 16,
-        "steps_per_print": args.log_interval,
+        "steps_per_print": command_args.log_interval,
         "optimizer": {
             "type": "Adam",
             "params": {"lr": 0.001, "betas": [0.8, 0.999], "eps": 1e-8, "weight_decay": 3e-7},
@@ -95,9 +98,9 @@ def get_ds_config(args):
         },
         "gradient_clipping": 1.0,
         "prescale_gradients": False,
-        "bf16": {"enabled": args.dtype == "bf16"},
+        "bf16": {"enabled": command_args.dtype == "bf16"},
         "fp16": {
-            "enabled": args.dtype == "fp16",
+            "enabled": command_args.dtype == "fp16",
             "fp16_master_weights_and_grads": False,
             "loss_scale": 0,
             "auto_cast": True,
@@ -108,7 +111,7 @@ def get_ds_config(args):
         },
         "wall_clock_breakdown": False,
         "zero_optimization": {
-            "stage": args.stage,
+            "stage": command_args.stage,
             "allgather_partitions": True,
             "reduce_scatter": True,
             "allgather_bucket_size": 50000000,
@@ -122,8 +125,9 @@ def get_ds_config(args):
 
 
 class Net(nn.Module):
+    """Define the Convolution Neural Network."""
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
@@ -132,6 +136,7 @@ class Net(nn.Module):
         self.fc3 = nn.Linear(84, 10)
 
     def forward(self, x):
+        """Forward pass of the network."""
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = x.view(-1, 16 * 5 * 5)
@@ -150,13 +155,14 @@ def test(model_engine, testset, local_device, target_dtype, test_batch_size=4):
         local_device (str): the local device name.
         target_dtype (torch.dtype): the target datatype for the test data.
         test_batch_size (int): the test batch size.
-
     """
+    # pylint: disable=too-many-locals
+
     # The 10 classes for CIFAR10.
     classes = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck")
 
     # Define the test dataloader.
-    testloader = torch.utils.data.DataLoader(
+    testloader = utils.data.DataLoader(
         testset, batch_size=test_batch_size, shuffle=False, num_workers=0
     )
 
@@ -168,13 +174,13 @@ def test(model_engine, testset, local_device, target_dtype, test_batch_size=4):
 
     # Start testing.
     model_engine.eval()
-    with torch.no_grad():
+    with no_grad():
         for data in testloader:
             images, labels = data
-            if target_dtype != None:
+            if target_dtype is not None:
                 images = images.to(target_dtype)
             outputs = model_engine(images.to(local_device))
-            _, predicted = torch.max(outputs.data, 1)
+            _, predicted = torch_max(outputs.data, 1)
             # Count the total accuracy.
             total += labels.size(0)
             correct += (predicted == labels.to(local_device)).sum().item()
@@ -187,19 +193,18 @@ def test(model_engine, testset, local_device, target_dtype, test_batch_size=4):
                 class_total[label] += 1
 
     if model_engine.local_rank == 0:
-        print(
-            f"Accuracy of the network on the {total} test images: {100 * correct / total : .0f} %"
-        )
+        print(f"Accuracy of the network on the {total} test images: {100*correct/total:.0f}%")
 
         # For all classes, print the accuracy.
         for i in range(10):
-            print(
-                f"Accuracy of {classes[i] : >5s} : {100 * class_correct[i] / class_total[i] : 2.0f} %"
-            )
+            print(f"Accuracy of {classes[i]:>5s}: {100*class_correct[i]/class_total[i]:2.0f}%")
 
 
 def main(args):
-    torch.manual_seed(0)
+    """Main function for the DeepSpeed example."""
+    # pylint: disable=too-many-locals, too-many-statements
+
+    manual_seed(0)
     # Initialize DeepSpeed distributed backend.
     deepspeed.init_distributed(dist_backend="nccl", auto_mpi_discovery=False)
 
@@ -217,22 +222,18 @@ def main(args):
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     )
 
-    if torch.distributed.get_rank() != 0:
+    if distributed.get_rank() != 0:
         # Might be downloading cifar data, let rank 0 download first.
-        torch.distributed.barrier()
+        distributed.barrier()
 
     # Load or download cifar data.
     data_path = os.path.expanduser("~/scratch/aihwkit-lightning-example/")
-    trainset = torchvision.datasets.CIFAR10(
-        root=data_path, train=True, download=True, transform=transform
-    )
-    testset = torchvision.datasets.CIFAR10(
-        root=data_path, train=False, download=True, transform=transform
-    )
+    trainset = datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
+    testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
 
-    if torch.distributed.get_rank() == 0:
+    if distributed.get_rank() == 0:
         # Cifar data is downloaded, indicate other ranks can proceed.
-        torch.distributed.barrier()
+        distributed.barrier()
 
     ########################################################################
     # Step 2. Define the network with DeepSpeed.
@@ -273,9 +274,9 @@ def main(args):
     # For float32, target_dtype will be None so no datatype conversion needed.
     target_dtype = None
     if model_engine.bfloat16_enabled():
-        target_dtype = torch.bfloat16
+        target_dtype = bfloat16
     elif model_engine.fp16_enabled():
-        target_dtype = torch.float16
+        target_dtype = float16
 
     # Define the Classification Cross-Entropy loss function.
     criterion = nn.CrossEntropyLoss()
@@ -299,7 +300,7 @@ def main(args):
             inputs, labels = data[0].to(local_device), data[1].to(local_device)
 
             # Try to convert to target_dtype if needed.
-            if target_dtype != None:
+            if target_dtype is not None:
                 inputs = inputs.to(target_dtype)
 
             outputs = model_engine(inputs)
@@ -309,7 +310,7 @@ def main(args):
 
             # For DeepSpeed, we need to implement the clipping manually
             # this is what we changed. we clip the weights when we updated the parameters
-            with torch.no_grad():
+            with no_grad():
                 if hasattr(net, "analog_layers"):
                     for analog_layer in net.analog_layers():
                         analog_layer.clip_weights()
@@ -333,5 +334,5 @@ def main(args):
 
 
 if __name__ == "__main__":
-    args = add_argument()
-    main(args)
+    arguments = add_argument()
+    main(arguments)

@@ -23,6 +23,7 @@ from aihwkit_lightning.simulator.configs import (
 )
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
+from aihwkit_lightning.exceptions import ConfigError
 
 
 def is_at_least_volta_gpu():
@@ -69,6 +70,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
             .cumsum(dim=0, dtype=int32)
             .contiguous()
         )
+
+        if rpu_config.forward.inp_res > 0 and not rpu_config.pre_post.input_range.enable:
+            raise ConfigError("Input quant. without input range is not supported.")
 
         if rpu_config.pre_post.input_range.enable:
             # for every vertical tile, we have an input range

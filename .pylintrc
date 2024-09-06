@@ -65,7 +65,8 @@ disable=similarities,
 	consider-using-f-string,
         fixme,
         useless-type-doc,
-        relative-beyond-top-level
+        relative-beyond-top-level,
+        import-error
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option

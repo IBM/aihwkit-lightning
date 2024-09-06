@@ -385,6 +385,7 @@ def benchmark_triton_implementation(max_input_size: int):
             n_cols (int): Number of columns
             n_rows (int): Number of rows
             provider (int): torch or triton
+            max_input_size (int): Maximum input size
 
         Returns:
             Tuple[float]: Median, min, max of the runtimes in ms
@@ -441,10 +442,8 @@ def benchmark_triton_implementation(max_input_size: int):
             )
         return time_ms, max_ms, min_ms
 
-    layer_benchmark.run(
-        print_data=True,
-        save_path=f"debug/linear_performance_fwd_bwd_torch_vs_triton_max_input_size_{max_input_size}",
-    )
+    save_path = f"debug/linear_performance_fwd_bwd_torch_vs_triton_max_input_size_{max_input_size}"
+    layer_benchmark.run(print_data=True, save_path=save_path)
 
 
 if __name__ == "__main__":

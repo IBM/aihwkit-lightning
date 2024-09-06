@@ -244,6 +244,7 @@ class TorchLinear:
 
             # maybe do some quantization
             if rpu_config.forward.inp_res > 0:
+                assert input_range is not None, "Input range must be provided"
                 inp_slice = UniformQuantize.apply(
                     inp_slice, rpu_config.forward.inp_res, input_range[slice_idx], True
                 )
@@ -304,6 +305,8 @@ class TorchLinear:
 
             if training and rpu_config.forward.out_noise > 0:
                 assert assumed_wmax is not None, "Assumed wmax must be provided for out noise"
+                assert rpu_config.pre_post.input_range.enable, "Input range must be enabled"
+                assert input_range is not None, "Input range must be provided"
                 with no_grad():
                     # note that assumed_wmax has the correct shape here
                     if out_slice.ndim == 1:
@@ -325,6 +328,10 @@ class TorchLinear:
                 out_slice += out_noise
 
             if rpu_config.forward.out_bound > 0 or apply_out_quantization:
+                assert (
+                    input_range is not None
+                ), "Input range must be provided when using an out_bound or out quantization"
+                assert assumed_wmax is not None, "Assumed wmax must be provided for out bound"
                 with no_grad():
                     bound = (
                         input_range[slice_idx] * rpu_config.forward.out_bound

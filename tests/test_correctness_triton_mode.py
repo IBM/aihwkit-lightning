@@ -40,32 +40,6 @@ from aihwkit_lightning.simulator.configs import WeightModifierType, WeightClipTy
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 
 
-# @mark.parametrize("bsz", [1, 10])
-# @mark.parametrize("num_inp_dims", [1, 2, 3])
-# @mark.parametrize("inp_size", [10, 32])
-# @mark.parametrize("out_size", [10, 32])
-# @mark.parametrize("bias", [True])
-# @mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
-# @mark.parametrize("max_inp_size", [20])
-# @mark.parametrize("ir_enable", [True, False])
-# @mark.parametrize("ir_learn_input_range", [True, False])
-# @mark.parametrize("ir_init_value", [3.0])
-# @mark.parametrize("ir_init_std_alpha", [2.0])
-# @mark.parametrize("adc_config", [(-1, -1), (10, 2**8 - 2), (10, 1 / (2**8 - 2))])
-# @mark.parametrize("out_noise", [True, False])
-# @mark.parametrize("out_noise_per_channel", [True, False])
-# @mark.parametrize(
-#     "weight_modifier",
-#     [
-#         WeightModifierType.DISCRETIZE,
-#         WeightModifierType.DISCRETIZE_PER_CHANNEL,
-#         WeightModifierType.NONE,
-#     ],
-# )
-# @mark.parametrize("weight_modifier_res", [2**8 - 2, 1 / (2**8 - 2)])
-# @mark.parametrize("clip_type", [WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL, WeightClipType.NONE])
-# @mark.parametrize("device", ["cuda"])  # cpu not supported for triton
-# @mark.parametrize("dtype", [float32, float16, bfloat16])
 @mark.parametrize("bsz", [1, 10])
 @mark.parametrize("num_inp_dims", [1, 2, 3])
 @mark.parametrize("inp_size", [10, 32])
@@ -77,11 +51,18 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("ir_learn_input_range", [True, False])
 @mark.parametrize("ir_init_value", [3.0])
 @mark.parametrize("ir_init_std_alpha", [2.0])
-@mark.parametrize("adc_config", [(10, 2**8 - 2), (10, 1 / (2**8 - 2))])
+@mark.parametrize("adc_config", [(-1, -1), (10, 2**8 - 2), (10, 1 / (2**8 - 2))])
 @mark.parametrize("out_noise", [True, False])
 @mark.parametrize("out_noise_per_channel", [True, False])
-@mark.parametrize("weight_modifier", [WeightModifierType.NONE])
-@mark.parametrize("weight_modifier_res", [2**8 - 2])
+@mark.parametrize(
+    "weight_modifier",
+    [
+        WeightModifierType.DISCRETIZE,
+        WeightModifierType.DISCRETIZE_PER_CHANNEL,
+        WeightModifierType.NONE,
+    ],
+)
+@mark.parametrize("weight_modifier_res", [2**8 - 2, 1 / (2**8 - 2)])
 @mark.parametrize("clip_type", [WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL, WeightClipType.NONE])
 @mark.parametrize("device", ["cuda"])  # cpu not supported for triton
 @mark.parametrize("dtype", [float32])
@@ -128,10 +109,10 @@ def test_linear_forward(
     if out_noise and weight_modifier != WeightModifierType.NONE:
         raise SkipTest("Output noise and non-None weight modifier skipped")
 
-    if not ir_enable and not (adc_config == (-1, -1)):
+    if not ir_enable and not adc_config == (-1, -1):
         raise SkipTest("No ADC when no inp. quantization.")
 
-    if out_noise and not (adc_config == (-1, -1)):
+    if out_noise and not adc_config == (-1, -1):
         # we ensure that the noise vector instance is the same for
         # triton and torch. As a result, the outputs might end up
         # in different quantization bins, causing stronger changes
@@ -230,104 +211,99 @@ def test_linear_forward(
         assert allclose(out_triton, out, atol=atol)
 
 
-# @mark.parametrize("bsz", [1, 10])
-# @mark.parametrize("num_inp_dims", [1, 2, 3])
-# @mark.parametrize("inp_size", [10, 255, 513])
-# @mark.parametrize("out_size", [10, 255, 513])
-# @mark.parametrize("bias", [True, False])
-# @mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
-# @mark.parametrize("max_inp_size", [256, 512])
-# @mark.parametrize("ir_init_value", [2.0, 3.0])
-# @mark.parametrize("ir_init_from_data", [0, 10])
-# @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
-# @mark.parametrize("device", ["cuda"])
-# @mark.parametrize("dtype", [float32, float16, bfloat16])
-# def test_input_range_backward(  # pylint: disable=too-many-arguments
-#     bsz: int,
-#     num_inp_dims: int,
-#     inp_size: int,
-#     out_size: int,
-#     bias: bool,
-#     inp_res: float,
-#     max_inp_size: int,
-#     ir_init_value: float,
-#     ir_init_from_data: int,
-#     ir_init_std_alpha: float,
-#     device: str,
-#     dtype: torch_dtype,
-# ):
-#     """Test the input range backward pass."""
+@mark.parametrize("bsz", [1, 10])
+@mark.parametrize("num_inp_dims", [1, 2, 3])
+@mark.parametrize("inp_size", [10, 255, 513])
+@mark.parametrize("out_size", [10, 255, 513])
+@mark.parametrize("bias", [True, False])
+@mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
+@mark.parametrize("max_inp_size", [256, 512])
+@mark.parametrize("ir_init_value", [2.0, 3.0])
+@mark.parametrize("ir_init_from_data", [0, 10])
+@mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
+@mark.parametrize("device", ["cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16])
+def test_input_range_backward(  # pylint: disable=too-many-arguments
+    bsz: int,
+    num_inp_dims: int,
+    inp_size: int,
+    out_size: int,
+    bias: bool,
+    inp_res: float,
+    max_inp_size: int,
+    ir_init_value: float,
+    ir_init_from_data: int,
+    ir_init_std_alpha: float,
+    device: str,
+    dtype: torch_dtype,
+):
+    """Test the input range backward pass."""
 
-#     if device == "cuda" and SKIP_CUDA_TESTS:
-#         raise SkipTest("CUDA tests are disabled/ can't be performed")
+    if device == "cuda" and SKIP_CUDA_TESTS:
+        raise SkipTest("CUDA tests are disabled/ can't be performed")
 
-#     if num_inp_dims == 1 and bsz > 1:
-#         raise SkipTest("1D input but bsz > 1")
+    if num_inp_dims == 1 and bsz > 1:
+        raise SkipTest("1D input but bsz > 1")
 
-#     if dtype == bfloat16:
-#         raise SkipTest("Bfloat16 currently not supported for triton")
+    if dtype == bfloat16:
+        raise SkipTest("Bfloat16 currently not supported for triton")
 
-#     os.environ["_AIHWKIT_NO_ROUNDING"] = "1"
-#     os.environ["AIHWKIT_TESTING"] = "1"
-#     manual_seed(0)
+    os.environ["_AIHWKIT_NO_ROUNDING"] = "1"
+    os.environ["AIHWKIT_TESTING"] = "1"
+    manual_seed(0)
 
-#     def populate_rpu(rpu_config: RPUConfig):
-#         rpu_config.forward.inp_res = inp_res
-#         rpu_config.forward.out_noise = 0.0
-#         rpu_config.mapping.max_input_size = max_inp_size
-#         rpu_config.pre_post.input_range.enable = True
-#         rpu_config.pre_post.input_range.learn_input_range = True
-#         rpu_config.pre_post.input_range.init_value = ir_init_value
-#         rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
-#         rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
-#         return rpu_config
+    def populate_rpu(rpu_config: RPUConfig):
+        rpu_config.forward.inp_res = inp_res
+        rpu_config.forward.out_noise = 0.0
+        rpu_config.mapping.max_input_size = max_inp_size
+        rpu_config.pre_post.input_range.enable = True
+        rpu_config.pre_post.input_range.learn_input_range = True
+        rpu_config.pre_post.input_range.init_value = ir_init_value
+        rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
+        rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
+        return rpu_config
 
-#     rpu = populate_rpu(RPUConfig())
-#     linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
-#     linear = linear.to(device=device, dtype=dtype)
+    rpu = populate_rpu(RPUConfig())
+    linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
+    linear = linear.to(device=device, dtype=dtype)
 
-#     linear_triton = AnalogLinear(
-#         in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu
-#     )
-#     linear_triton.load_state_dict(linear.state_dict())
-#     linear_triton = linear_triton.to(device=device, dtype=dtype)
+    linear_triton = AnalogLinear(
+        in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu
+    )
+    linear_triton.load_state_dict(linear.state_dict())
+    linear_triton = linear_triton.to(device=device, dtype=dtype)
 
-#     if num_inp_dims == 1:
-#         inp = randn(inp_size, device=device, dtype=dtype, requires_grad=True)
-#     elif num_inp_dims == 2:
-#         inp = randn(bsz, inp_size, device=device, dtype=dtype, requires_grad=True)
-#     else:
-#         inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype, requires_grad=True)
-#     inp_triton = empty_like(inp, requires_grad=True)
-#     inp_triton.data = inp.data.clone()
+    if num_inp_dims == 1:
+        inp = randn(inp_size, device=device, dtype=dtype, requires_grad=True)
+    elif num_inp_dims == 2:
+        inp = randn(bsz, inp_size, device=device, dtype=dtype, requires_grad=True)
+    else:
+        inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype, requires_grad=True)
+    inp_triton = empty_like(inp, requires_grad=True)
+    inp_triton.data = inp.data.clone()
 
-#     os.environ["AIHWKIT_USE_TRITON"] = "1"
-#     out_triton: Tensor
-#     out_triton = linear_triton(inp_triton)  # pylint: disable=not-callable
-#     del os.environ["AIHWKIT_USE_TRITON"]
+    os.environ["AIHWKIT_USE_TRITON"] = "1"
+    out_triton: Tensor
+    out_triton = linear_triton(inp_triton)  # pylint: disable=not-callable
+    del os.environ["AIHWKIT_USE_TRITON"]
 
-#     out: Tensor
-#     out = linear(inp)  # pylint: disable=not-callable
+    out: Tensor
+    out = linear(inp)  # pylint: disable=not-callable
 
-#     atol = 1e-5 if dtype == float32 else 1e-2
-#     assert allclose(out, out_triton, atol=atol)
+    atol = 1e-5 if dtype == float32 else 1e-2
+    assert allclose(out, out_triton, atol=atol)
 
-#     out.mean().backward()
-#     out_triton.mean().backward()
+    out.mean().backward()
+    out_triton.mean().backward()
 
-#     # compare the weight gradient
-#     assert allclose(linear.weight.grad, linear_triton.weight.grad, atol=atol)
+    # compare the weight gradient
+    assert allclose(linear.weight.grad, linear_triton.weight.grad, atol=atol)
 
-#     # compare the inp gradient
-#     assert allclose(inp.grad, inp_triton.grad, atol=atol)
+    # compare the inp gradient
+    assert allclose(inp.grad, inp_triton.grad, atol=atol)
 
-#     # compare the input range
-#     # # This doesn't work for fundamental reasons: we don't have access to d L / d
-#     # slice-x since we sum up the slices in the triton kernel.
-#     # assert allclose(linear.input_range.grad, linear_triton.input_range.grad, atol=atol)
-
-#     del os.environ["_AIHWKIT_NO_ROUNDING"]
-#     del os.environ["AIHWKIT_TESTING"]
+    del os.environ["_AIHWKIT_NO_ROUNDING"]
+    del os.environ["AIHWKIT_TESTING"]
 
 
 if __name__ == "__main__":

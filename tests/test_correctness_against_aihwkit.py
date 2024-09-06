@@ -855,7 +855,7 @@ def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, d
 
 
 if __name__ == "__main__":
-    rpus = fixture_rpus(
+    test_rpus = fixture_rpus(
         max_inp_size=256,
         ir_enable_inp_res=(True, 254),
         ir_learn_input_range=True,
@@ -879,7 +879,7 @@ if __name__ == "__main__":
     #     bias=True,
     #     device=torch_device("cuda"),
     #     dtype=float32,
-    #     rpus=rpus,
+    #     rpus=test_rpus,
     # )
     test_backward(
         bsz=2,
@@ -889,7 +889,7 @@ if __name__ == "__main__":
         bias=True,
         device=torch_device("cuda"),
         dtype=float32,
-        rpus=rpus,
+        rpus=test_rpus,
     )
     # test_linear_forward(
     #     bsz=2,
@@ -899,5 +899,5 @@ if __name__ == "__main__":
     #     bias=True,
     #     device=torch_device("cuda"),
     #     dtype=float16,
-    #     rpus=rpus,
+    #     rpus=test_rpus,
     # )
