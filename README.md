@@ -55,12 +55,17 @@ In the [examples] folder, we have some examples that show how to use the AIHWKIT
 - [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning] shows how to do multi-node training of a language model using DeepSpeed, Slurm, Huggingface Accelerate and AIHWKIT-Lightning.
 
 ## Contributing
+Before starting to write code for a possible contribution, please get in touch with us on Slack or by opening an issue. We can then discuss whether the proposed feature makes sense for this toolkit and how
+to proceed.
+
+For bug-fixes, please follow the instructions below.
+
 Install the development requirements.
 ```bash
 pip install -r requirements_dev.txt
 mypy --install-types
 ```
-Create a branch from the `main` branch and make a well-documented PR. Make sure to run the following before submitting the PR:
+Create a fork from the `main` branch and make a well-documented PR. Make sure to run the following before submitting the PR:
 ```bash
 make pytest
 make black
