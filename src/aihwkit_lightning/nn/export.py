@@ -78,6 +78,9 @@ def export_to_aihwkit(module: Module):
         raise NotImplementedError("dtype %s not implemented." % dtype)
 
     aihwkit_rpu_config.runtime.data_type = DTYPE_MAP[dtype]
+    if aihwkit_rpu_config.clip.type.name == "AVERAGE_CHANNEL_MAX":
+        raise NotImplementedError
+
     aihwkit_rpu_config.clip.type = WeightClipType[rpu_config.clip.type.name]
     aihwkit_rpu_config.clip.sigma = rpu_config.clip.sigma
     aihwkit_rpu_config.forward.inp_res = rpu_config.forward.inp_res
@@ -124,7 +127,8 @@ def export_to_aihwkit(module: Module):
         assert hasattr(module_, "analog_module")
         for tile_id, tile in enumerate(module_.analog_tiles()):
             tile.input_range = Parameter(
-                input_range[tile_id].to(dtype=tile.input_range.dtype), requires_grad=False
+                input_range[tile_id].to(dtype=tile.input_range.dtype),
+                requires_grad=tile.input_range.requires_grad,
             )
 
     if training:

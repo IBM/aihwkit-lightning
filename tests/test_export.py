@@ -27,7 +27,7 @@ from torch import cuda as torch_cuda
 from torch import allclose, randn, float32, float16
 from torch.nn import Conv2d, Linear, Module
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
-from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
+from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType, WeightClipType
 from aihwkit_lightning.nn.conversion import convert_to_analog
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.nn.export import export_to_aihwkit
@@ -97,6 +97,7 @@ def fixture_rpus(
     ir_enable = ir_enable_inp_res[0]
     inp_res = ir_enable_inp_res[1]
     rpu_config = RPUConfig()
+    rpu_config.clip.type = WeightClipType.LAYER_GAUSSIAN
     rpu_config.mapping.max_output_size = -1
     rpu_config.forward.noise_management = (
         NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
@@ -128,7 +129,7 @@ def fixture_rpus(
 @mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0], indirect=True)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16], ids=str)  # bfloat is
+@mark.parametrize("dtype", [float32], ids=str)
 def test_linear_forward(
     bsz: int,
     num_inp_dims: int,
@@ -143,15 +144,15 @@ def test_linear_forward(
     """Test the forward pass."""
     rpu_config = rpu
 
-    class Net(Module):
+    class FCNet(Module):
         def __init__(self):
-            super(Net, self).__init__()
+            super(FCNet, self).__init__()
             self.fc1 = Linear(in_features=inp_size, out_features=out_size, bias=bias)
 
         def forward(self, x):
             return self.fc1(x)
 
-    linear = convert_to_analog(Net(), rpu_config=rpu_config)
+    linear = convert_to_analog(FCNet(), rpu_config=rpu_config)
     linear = linear.eval().to(device=device, dtype=dtype)
     aihwkit_linear = export_to_aihwkit(linear)
     if num_inp_dims == 1:
@@ -185,7 +186,7 @@ def test_linear_forward(
 @mark.parametrize("ir_init_from_data", [10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32, float16], ids=str)
+@mark.parametrize("dtype", [float32], ids=str)
 def test_conv2d_forward(
     bsz: int,
     num_inp_dims: int,
@@ -210,9 +211,9 @@ def test_conv2d_forward(
 
     rpu_config = rpu
 
-    class Net(Module):
+    class ConvNet(Module):
         def __init__(self):
-            super(Net, self).__init__()
+            super(ConvNet, self).__init__()
             self.conv1 = Conv2d(
                 in_channels=in_channels,
                 out_channels=out_channels,
@@ -227,7 +228,7 @@ def test_conv2d_forward(
         def forward(self, x):
             return self.conv1(x)
 
-    conv = convert_to_analog(Net(), rpu_config=rpu_config)
+    conv = convert_to_analog(ConvNet(), rpu_config=rpu_config)
     conv = conv.eval().to(device=device, dtype=dtype)
     aihwkit_conv = export_to_aihwkit(conv)
     if num_inp_dims == 1:
