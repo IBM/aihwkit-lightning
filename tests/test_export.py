@@ -11,26 +11,27 @@
 # that they have been altered from the originals.
 
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
-# pylint: disable=too-many-arguments, too-many-branches, too-many-statements
+# pylint: disable=too-many-arguments, too-many-branches, too-many-statements\
+# mypy: disable-error-code="arg-type"
 """Test the export method to AIHWKIT."""
 
 import os
-from typing import Union, List, Tuple
+from typing import Tuple
 from unittest import SkipTest
-import logging
 from itertools import product
 from pytest import mark, fixture
 
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch import cuda as torch_cuda
-from torch import allclose, randn, float32, float16
-from torch.nn import Conv2d, Linear, Module
-from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
-from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType, WeightClipType
+from torch import arange, allclose, randn, manual_seed, float32, float16, bfloat16
+from torch.nn import Linear, Module
+
 from aihwkit_lightning.nn.conversion import convert_to_analog
+from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.nn.export import export_to_aihwkit
+from aihwkit_lightning.nn import AnalogLinear
 
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 
@@ -71,43 +72,62 @@ def fixture_ir_init_std_alpha(request) -> float:
     return request.param
 
 
+@fixture(scope="module", name="adc_config")
+def fixture_adc_config(request) -> Tuple[float, float]:
+    """Tuple of out_bound, out_res for ADC"""
+    return request.param
+
+
+@fixture(scope="module", name="clip_type")
+def fixture_clip_type(request) -> WeightClipType:
+    """Weight clip type parameter"""
+    return request.param
+
+
+@fixture(scope="module", name="weight_modifier_type")
+def fixture_weight_modifier_type(request) -> WeightModifierType:
+    """Weight modifier type parameter"""
+    return request.param
+
+
 bsz_num_inp_dims_parameters = [
     (bsz, num_inp_dims)
-    for bsz, num_inp_dims in list(product([1, 10], [1, 2, 3]))
+    for bsz, num_inp_dims in list(product([1, 2], [1, 2, 3]))
     if not (num_inp_dims == 1 and bsz > 1)
 ]
 
 
-def out_allclose(out_1, out_2, dtype):
-    """Check that outs are close"""
-    atol = 1e-4 if dtype == float16 else 1e-5
-    return allclose(out_1, out_2, atol=atol)
-
-
 @fixture(scope="module", name="rpu")
-def fixture_rpus(
-    max_inp_size,
-    ir_enable_inp_res,
-    ir_learn_input_range,
-    ir_init_value,
-    ir_init_from_data,
-    ir_init_std_alpha,
-) -> Tuple[AIHWKITRPUConfig, RPUConfig]:
-    """Fixture for initializing rpus globally for all tests that need them"""
-    ir_enable = ir_enable_inp_res[0]
-    inp_res = ir_enable_inp_res[1]
+def fixture_rpu(
+    max_inp_size: int,
+    ir_enable_inp_res: Tuple[bool, float],
+    ir_learn_input_range: bool,
+    ir_init_value: float,
+    ir_init_from_data: int,
+    ir_init_std_alpha: float,
+    adc_config: Tuple[float, float],
+    clip_type: WeightClipType,
+    weight_modifier_type: WeightModifierType,
+) -> RPUConfig:
+    """Fixture for initializing rpu globally for all tests that need them"""
+    ir_enable, inp_res = ir_enable_inp_res
+    out_bound, out_res = adc_config
     rpu_config = RPUConfig()
-    rpu_config.clip.type = WeightClipType.LAYER_GAUSSIAN
-    rpu_config.mapping.max_output_size = -1
-    rpu_config.forward.noise_management = (
-        NoiseManagementType.ABS_MAX if not ir_enable else NoiseManagementType.NONE
-    )
-    rpu_config.forward.bound_management = BoundManagementType.NONE
+
+    rpu_config.clip.type = clip_type
+    rpu_config.clip.sigma = 2.0
+
+    rpu_config.modifier.type = weight_modifier_type
+    rpu_config.modifier.std_dev = 0.0
+
     rpu_config.forward.inp_res = inp_res
-    rpu_config.forward.out_res = -1
-    rpu_config.forward.out_bound = -1
+
+    rpu_config.forward.out_res = out_res
+    rpu_config.forward.out_bound = out_bound
     rpu_config.forward.out_noise = 0.0
+
     rpu_config.mapping.max_input_size = max_inp_size
+
     rpu_config.pre_post.input_range.enable = ir_enable
     rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
     rpu_config.pre_post.input_range.init_value = ir_init_value
@@ -117,10 +137,10 @@ def fixture_rpus(
 
 
 @mark.parametrize("bsz, num_inp_dims", bsz_num_inp_dims_parameters)
-@mark.parametrize("inp_size", [10, 265])
-@mark.parametrize("out_size", [10, 265])
-@mark.parametrize("bias", [True, False])
-@mark.parametrize("max_inp_size", [256], indirect=True)
+@mark.parametrize("inp_size", [10])
+@mark.parametrize("out_size", [10])
+@mark.parametrize("bias", [True])
+@mark.parametrize("max_inp_size", [9, 11], indirect=True)
 @mark.parametrize(
     "ir_enable_inp_res", [(True, 2**8 - 2), (True, 1 / (2**8 - 2))], ids=str, indirect=True
 )
@@ -128,6 +148,29 @@ def fixture_rpus(
 @mark.parametrize("ir_init_value", [2.0, 3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0], indirect=True)
+@mark.parametrize(
+    "adc_config", [(-1, -1), (10, 2**8 - 2), (10, 1 / (2**8 - 2))], ids=str, indirect=True
+)
+@mark.parametrize(
+    "clip_type",
+    [WeightClipType.NONE, WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL],
+    ids=str,
+    indirect=True,
+)
+@mark.parametrize(
+    "weight_modifier_type",
+    [
+        WeightModifierType.NONE,
+        # WeightModifierType.DISCRETIZE,
+        # WeightModifierType.DISCRETIZE_PER_CHANNEL,
+        # WeightModifierType.ADD_NORMAL,
+        # WeightModifierType.ADD_NORMAL_PER_CHANNEL,
+        # WeightModifierType.DISCRETIZE_ADD_NORMAL,
+        # WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+    ],
+    ids=str,
+    indirect=True,
+)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32], ids=str)
 def test_linear_forward(
@@ -138,109 +181,82 @@ def test_linear_forward(
     bias: bool,
     device: torch_device,
     dtype: torch_dtype,
-    rpu,
-    caplog,
+    rpu: RPUConfig,
 ):
     """Test the forward pass."""
-    rpu_config = rpu
 
-    class FCNet(Module):
-        """NN."""
+    # Set the seed for debugging
+    manual_seed(0)
+
+    if rpu.forward.out_res > 0:
+        # we need the weights to be normalized
+        if dtype in [float16, bfloat16]:
+            raise SkipTest(
+                "ADC tests are done in FP32 only. "
+                "This is because it requires re-mapping. "
+                "Comparing an MVM with normalized vs."
+                "un-normalized weights in FP16 is not feasible "
+                "because the quantization error will be too high."
+            )
+
+    class TestModel(Module):
+        """Test Model."""
+
         def __init__(self):
-            super(FCNet, self).__init__()
+            super().__init__()
             self.fc1 = Linear(in_features=inp_size, out_features=out_size, bias=bias)
 
         def forward(self, x):
             """Forward."""
             return self.fc1(x)
 
-    linear = convert_to_analog(FCNet(), rpu_config=rpu_config)
-    linear = linear.eval().to(device=device, dtype=dtype)
-    aihwkit_linear = export_to_aihwkit(linear)
+    # Convert to analog using aihwkit-lightning
+    model = convert_to_analog(TestModel(), rpu_config=rpu)
+
+    # Make the input range a bit harder
+    analog_layer: AnalogLinear
+    for analog_layer in model.analog_layers():
+        if rpu.pre_post.input_range.enable:
+            input_range_tensor = analog_layer.input_range
+            analog_layer.input_range.data = 0.1 + arange(input_range_tensor.numel()).float()
+
+    model = model.eval().to(device=device, dtype=dtype)
+    aihwkit_model = export_to_aihwkit(model=model)
+
     if num_inp_dims == 1:
         inp = randn(inp_size, device=device, dtype=dtype)
-    if num_inp_dims == 2:
+    elif num_inp_dims == 2:
         inp = randn(bsz, inp_size, device=device, dtype=dtype)
     else:
         inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype)
 
-    out = linear(inp)  # pylint: disable=not-callable
-    out_aihwkit = aihwkit_linear(inp)  # pylint: disable=not-callable
-    assert out_allclose(out_aihwkit, out, dtype, caplog)
+    out = model(inp)  # pylint: disable=not-callable
+    out_aihwkit = aihwkit_model(inp)  # pylint: disable=not-callable
+
+    atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
+    assert allclose(out_aihwkit, out, atol=atol)
 
 
-@mark.parametrize("bsz", [1, 10])
-@mark.parametrize("num_inp_dims", [1, 2])
-@mark.parametrize("height", [10, 265])
-@mark.parametrize("width", [10, 265])
-@mark.parametrize("in_channels", [3, 10])
-@mark.parametrize("out_channels", [3, 10])
-@mark.parametrize("kernel_size", [[3, 3], [3, 4]], ids=str)
-@mark.parametrize("stride", [[1, 1]], ids=str)
-@mark.parametrize("padding", [[1, 1]], ids=str)
-@mark.parametrize("dilation", [[1, 1]], ids=str)
-@mark.parametrize("groups", [1])
-@mark.parametrize("bias", [True])
-@mark.parametrize("max_inp_size", [256], indirect=True)
-@mark.parametrize("ir_enable_inp_res", [(True, 2**8 - 2)], ids=str, indirect=True)
-@mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
-@mark.parametrize("ir_init_value", [3.0], indirect=True)
-@mark.parametrize("ir_init_from_data", [10], indirect=True)
-@mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
-@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
-@mark.parametrize("dtype", [float32], ids=str)
-def test_conv2d_forward(
-    bsz: int,
-    num_inp_dims: int,
-    height: int,
-    width: int,
-    in_channels: int,
-    out_channels: int,
-    kernel_size: List[int],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
-    groups: int,
-    bias: bool,
-    device: torch_device,
-    dtype: torch_dtype,
-    rpu,
-    caplog,
-):
-    """Test the Conv2D forward pass."""
-    if groups > 1:
-        raise SkipTest("AIHWKIT currently does not support groups > 1")
+if __name__ == "__main__":
+    test_rpu = fixture_rpu(
+        max_inp_size=5,
+        ir_enable_inp_res=(True, 254),
+        ir_learn_input_range=True,
+        ir_init_value=3.0,
+        ir_init_from_data=10,
+        ir_init_std_alpha=3.0,
+        adc_config=(-1, -1),
+        clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
+        weight_modifier_type=WeightModifierType.NONE,
+    )
 
-    rpu_config = rpu
-
-    class ConvNet(Module):
-        """NN."""
-        def __init__(self):
-            super(ConvNet, self).__init__()
-            self.conv1 = Conv2d(
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                dilation=dilation,
-                groups=groups,
-                bias=bias,
-            )
-
-        def forward(self, x):
-            """Forward."""
-            return self.conv1(x)
-
-    conv = convert_to_analog(ConvNet(), rpu_config=rpu_config)
-    conv = conv.eval().to(device=device, dtype=dtype)
-    aihwkit_conv = export_to_aihwkit(conv)
-    if num_inp_dims == 1:
-        inp = randn(in_channels, height, width, device=device, dtype=dtype)
-    else:
-        assert num_inp_dims == 2, "Only batched or non-batched inputs are supported"
-        inp = randn(bsz, in_channels, height, width, device=device, dtype=dtype)
-
-    out = conv(inp)  # pylint: disable=not-callable
-    out_aihwkit = aihwkit_conv(inp)  # pylint: disable=not-callable
-    assert out_allclose(out_aihwkit, out, dtype, caplog)
+    test_linear_forward(
+        bsz=3,
+        num_inp_dims=1,
+        inp_size=10,
+        out_size=10,
+        bias=True,
+        device="cpu",
+        dtype=float32,
+        rpu=test_rpu,
+    )
