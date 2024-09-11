@@ -13,15 +13,10 @@
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
 # pylint: disable=too-many-arguments, too-many-branches, too-many-statements
 
-import os
-import argparse
 from functools import reduce
 import torch
-import torch.nn as nn
 from torch.nn import Parameter, Module
-import torch.nn.functional as F
 
-from aihwkit_lightning.nn.modules.container import AnalogWrapper
 from aihwkit_lightning.nn.conversion import convert_to_digital
 from aihwkit.simulator.parameters.enums import RPUDataType
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
@@ -68,7 +63,7 @@ def get_module_by_name(module: Module, access_string: str) -> Module:
 
 def export_to_aihwkit(module: Module):
     """Export a AIHWKITLighting model to an AIHWKIT model."""
-    rpu_config = next(module.analog_layers(), None)
+    rpu_config = next(module.analog_layers(), None) # pylint: disable=not-callable
     assert rpu_config is not None
     rpu_config = rpu_config.rpu_config
     dtype = next(module.parameters()).dtype
@@ -112,7 +107,7 @@ def export_to_aihwkit(module: Module):
     aihwkit_rpu_config.pre_post.input_range.learn_input_range = (
         rpu_config.pre_post.input_range.learn_input_range
     )
-    module.clip_weights()
+    module.clip_weights() # pylint: disable=not-callable
     module.eval()
     input_ranges = {}
     for name, module_ in module.named_modules():
@@ -121,7 +116,7 @@ def export_to_aihwkit(module: Module):
 
     module = AIHWKITconvert_to_analog(convert_to_digital(module), aihwkit_rpu_config)
     module.to(dtype=dtype)
-    module.remap_analog_weights()
+    module.remap_analog_weights() # pylint: disable=not-callable
     for name, input_range in input_ranges.items():
         module_ = get_module_by_name(module, name)
         assert hasattr(module_, "analog_module")

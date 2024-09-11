@@ -78,7 +78,7 @@ bsz_num_inp_dims_parameters = [
 ]
 
 
-def out_allclose(out_1, out_2, dtype, caplog):
+def out_allclose(out_1, out_2, dtype):
     """Check that outs are close"""
     atol = 1e-4 if dtype == float16 else 1e-5
     return allclose(out_1, out_2, atol=atol)
@@ -145,11 +145,13 @@ def test_linear_forward(
     rpu_config = rpu
 
     class FCNet(Module):
+        """NN."""
         def __init__(self):
             super(FCNet, self).__init__()
             self.fc1 = Linear(in_features=inp_size, out_features=out_size, bias=bias)
 
         def forward(self, x):
+            """Forward."""
             return self.fc1(x)
 
     linear = convert_to_analog(FCNet(), rpu_config=rpu_config)
@@ -212,6 +214,7 @@ def test_conv2d_forward(
     rpu_config = rpu
 
     class ConvNet(Module):
+        """NN."""
         def __init__(self):
             super(ConvNet, self).__init__()
             self.conv1 = Conv2d(
@@ -226,6 +229,7 @@ def test_conv2d_forward(
             )
 
         def forward(self, x):
+            """Forward."""
             return self.conv1(x)
 
     conv = convert_to_analog(ConvNet(), rpu_config=rpu_config)
