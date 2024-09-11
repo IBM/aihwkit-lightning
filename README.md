@@ -54,6 +54,17 @@ In the [examples] folder, we have some examples that show how to use the AIHWKIT
 - [DeepSpeed + AIHWKIT-Lightning] shows how to integrate AIHWKIT-Lightning with DeepSpeed.
 - [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning] shows how to do multi-node training of a language model using DeepSpeed, Slurm, Huggingface Accelerate and AIHWKIT-Lightning.
 
+### Exporting to AIHWKIT
+One can easily convert any model trained with AIHWKIT-Lightning to AIHWKIT.
+
+```python
+from aihwkit_lightning.nn.export import export_to_aihwkit
+# `model` is a model from AIHWKIT-Lightning
+# `max_output_size` <= 0 means that we do not
+# split layers along the output dimension
+aihwkit_model = export_to_aihwkit(model=model, max_output_size=-1)
+```
+
 ## Contributing
 Install the development requirements.
 ```bash

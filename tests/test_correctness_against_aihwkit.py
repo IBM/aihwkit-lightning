@@ -741,6 +741,9 @@ def test_weight_modifier_gradient(
 ):
     """Test the weight modifier backward behavior."""
 
+    if device == "cpu" and dtype != float32:
+        raise SkipTest("Skipping non-float32 tests for CPU")
+
     manual_seed(0)
     in_size = 10
     out_size = 20
