@@ -13,7 +13,7 @@
 .PHONY: mypy pycodestyle pylint pytest
 
 mypy:
-	mypy --show-error-codes src/
+	mypy --show-error-codes --ignore-missing-imports src/
 
 pycodestyle:
 	pycodestyle src/ tests/

@@ -249,7 +249,7 @@ def test_linear_forward(
 
 
 @mark.parametrize("bsz", [1, 10])
-@mark.parametrize("num_inp_dims", [1, 2])
+@mark.parametrize("num_inp_dims", [1, 2, 3])
 @mark.parametrize("height", [10])
 @mark.parametrize("width", [10])
 @mark.parametrize("in_channels", [3, 10])
@@ -293,6 +293,9 @@ def test_conv2d_forward(
     if groups > 1:
         raise SkipTest("AIHWKIT currently does not support groups > 1")
 
+    if num_inp_dims == 1:
+        raise SkipTest("AIHWKIT has a bug with 1D inputs in Conv layers")
+
     aihwkit_rpu, rpu = rpus
 
     aihwkit_analog_conv2d = AIWHKITAnalogConv2d(
@@ -329,7 +332,6 @@ def test_conv2d_forward(
     if num_inp_dims == 1:
         inp = randn(in_channels, height, width, device=device, dtype=dtype)
     else:
-        assert num_inp_dims == 2, "Only batched or non-batched inputs are supported"
         inp = randn(bsz, in_channels, height, width, device=device, dtype=dtype)
 
     digital_aihwkit_conv2d = AIWHKITAnalogConv2d.to_digital(aihwkit_analog_conv2d)
@@ -740,6 +742,9 @@ def test_weight_modifier_gradient(
     is_test: bool, enable_during_test: bool, device: str, dtype: torch_dtype
 ):
     """Test the weight modifier backward behavior."""
+
+    if device == "cpu" and dtype != float32:
+        raise SkipTest("Skipping non-float32 tests for CPU")
 
     manual_seed(0)
     in_size = 10

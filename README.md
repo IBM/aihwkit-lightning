@@ -2,6 +2,7 @@
 
 # AIHWKIT-Lightning ⚡
 [![Documentation Status](https://readthedocs.org/projects/aihwkit_lightning/badge/?version=latest)](https://aihwkit_lightning.readthedocs.io/en/latest/?badge=latest)
+[![Build Status](https://app.travis-ci.com/IBM/aihwkit-lightning.svg?token=nYQJ7muZkSyoDYxxh5yc&branch=main)](https://travis-ci.com/IBM/aihwkit-lightning)
 
 ## Installation
 ```bash
@@ -53,6 +54,17 @@ In the [examples] folder, we have some examples that show how to use the AIHWKIT
 - [Huggingface] shows how to train a network with Huggingface and AIHWKIT-Lightning.
 - [DeepSpeed + AIHWKIT-Lightning] shows how to integrate AIHWKIT-Lightning with DeepSpeed.
 - [SLURM + DeepSpeed + Huggingface Accelerate + AIHWKIT-Lightning] shows how to do multi-node training of a language model using DeepSpeed, Slurm, Huggingface Accelerate and AIHWKIT-Lightning.
+
+### Exporting to AIHWKIT
+One can easily convert any model trained with AIHWKIT-Lightning to AIHWKIT.
+
+```python
+from aihwkit_lightning.nn.export import export_to_aihwkit
+# `model` is a model from AIHWKIT-Lightning
+# `max_output_size` <= 0 means that we do not
+# split layers along the output dimension
+aihwkit_model = export_to_aihwkit(model=model, max_output_size=-1)
+```
 
 ## Contributing
 Before starting to write code for a possible contribution, please get in touch with us on Slack or by opening an issue. We can then discuss whether the proposed feature makes sense for this toolkit and how

@@ -12,6 +12,7 @@ API Reference
    aihwkit_lightning.inference.calibration.calibration
    aihwkit_lightning.nn
    aihwkit_lightning.nn.conversion
+   aihwkit_lightning.nn.export
    aihwkit_lightning.optim
    aihwkit_lightning.optim.analog_optimizer
    aihwkit_lightning.simulator

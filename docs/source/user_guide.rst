@@ -219,3 +219,16 @@ We can now define the analog optimizer:
     iterates ove the analog layers and calls :code:`analog_layer.clip_weights()`.
     This means that your weights are not clipped if you're framework uses a different optimizer internally.
     DeepSpeed does this for example. In Huggingface, this also happens when you don't pass an optimizer to the :code:`Trainer`.
+
+Converting to AIHWKIT
+---------------------
+
+We can now convert the model to AIHWKIT using the :func:`aihwkit_lightning.nn.export.export_to_aihwkit` function.
+Since AIHWKIT-Lightning does not chunk the layer matrices across the output dimension, but AIHWKIT supports this,
+we can pass the :code:`max_output_size` parameter to the export function. Setting this to anything smaller or equal
+to 0 will not result in chunking. This is the default behavior.
+
+.. code-block:: python
+
+    from aihwkit_lightning.nn.export import export_to_aihwkit
+    aihwkit_model = export_to_aihwkit(model=analog_model, max_output_size=-1)
