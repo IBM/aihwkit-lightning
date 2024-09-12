@@ -97,7 +97,7 @@ bsz_num_inp_dims_parameters = [
 ]
 
 
-# @fixture(scope="module", name="rpu")
+@fixture(scope="module", name="rpu")
 def fixture_rpu(
     max_inp_size: int,
     ir_enable_inp_res: Tuple[bool, float],
