@@ -6,7 +6,7 @@
 
 ## Installation
 ```bash
-git clone git@github.ibm.com:AIHW/aihwkit-lightning.git
+git clone git@github.com:IBM/aihwkit-lightning.git
 cd aihwkit-lightning
 pip install -e .
 ```
