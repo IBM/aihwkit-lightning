@@ -183,16 +183,20 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
             input_ranges[name] = analog_layer.input_range
 
     # Convert to AIHWKIT model
-    model = aihwkit_convert_to_analog(convert_to_digital(model), rpu_config=aihwkit_rpu_config)
+    aihwkit_model = aihwkit_convert_to_analog(
+        convert_to_digital(model), rpu_config=aihwkit_rpu_config
+    )
+
     model = model.to(device=device, dtype=dtype)
+    aihwkit_model = aihwkit_model.to(device=device, dtype=dtype)
 
     # Set remap weights
-    model.remap_analog_weights()  # pylint: disable=not-callable
+    aihwkit_model.remap_analog_weights()  # pylint: disable=not-callable
 
     # Set input ranges
-    model: AIHWKITAnalogWrapper  # type: ignore[no-redef]
+    aihwkit_model: AIHWKITAnalogWrapper  # type: ignore[no-redef]
     analog_tile: TileWithPeriphery
-    for analog_tile_name, analog_tile in model.named_analog_tiles():
+    for analog_tile_name, analog_tile in aihwkit_model.named_analog_tiles():
         module_pattern = r"analog_module\.array\.(\d+)"
         analog_name_pattern = r"^(.*?)\.analog_module"
 
@@ -209,5 +213,5 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
         analog_tile.input_range.data = input_range.clone().view_as(analog_tile.input_range)
 
     # Set back to training if needed
-    model = model.train() if training else model.eval()
-    return model
+    aihwkit_model = aihwkit_model.train() if training else aihwkit_model.eval()
+    return aihwkit_model

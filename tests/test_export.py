@@ -97,7 +97,7 @@ bsz_num_inp_dims_parameters = [
 ]
 
 
-@fixture(scope="module", name="rpu")
+# @fixture(scope="module", name="rpu")
 def fixture_rpu(
     max_inp_size: int,
     ir_enable_inp_res: Tuple[bool, float],
@@ -246,5 +246,5 @@ if __name__ == "__main__":
     )
 
     test_linear_forward(
-        bsz=3, num_inp_dims=2, inp_size=10, device="cpu", dtype=float32, rpu=test_rpu
+        bsz=3, num_inp_dims=2, inp_size=10, device="cuda", dtype=float32, rpu=test_rpu
     )
