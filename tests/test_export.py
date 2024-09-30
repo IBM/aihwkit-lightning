@@ -97,7 +97,7 @@ bsz_num_inp_dims_parameters = [
 ]
 
 
-@fixture(scope="module", name="rpu")
+# @fixture(scope="module", name="rpu")
 def fixture_rpu(
     max_inp_size: int,
     ir_enable_inp_res: Tuple[bool, float],
@@ -242,7 +242,7 @@ if __name__ == "__main__":
         ir_init_std_alpha=3.0,
         adc_config=(-1, -1),
         clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-        weight_modifier_type=WeightModifierType.NONE,
+        weight_modifier_type=WeightModifierType.ADD_NORMAL_PER_CHANNEL,
     )
 
     test_linear_forward(
