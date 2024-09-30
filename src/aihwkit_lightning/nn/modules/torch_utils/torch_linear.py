@@ -28,7 +28,7 @@ from aihwkit_lightning.exceptions import ConfigError
 class UniformQuantize(Function):
     """Quantization function."""
 
-    # pylint: disable=abstract-method, redefined-builtin, arguments-differ
+    # pylint: disable=abstract-method, redefined-builtin, arguments-differ, unused-argument
 
     @staticmethod
     def forward(
