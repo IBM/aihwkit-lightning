@@ -67,9 +67,9 @@ def base_aihwkit_rpu_config() -> AIHWKITRPUConfig:
 def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKITAnalogWrapper:
     """Export a AIHWKITLighting model to an AIHWKIT model."""
     modifier_name_conversion = {
-        "DiscretizePerChannel": "Discretize",
-        "AddNormalPerChannel": "AddNormal",
-        "DiscretizeAddNormalPerChannel": "DiscretizeAddNormal",
+        "DiscretizePerChannel": "DISCRETIZE",
+        "AddNormalPerChannel": "ADD_NORMAL",
+        "DiscretizeAddNormalPerChannel": "DISCRETIZE_ADD_NORMAL",
     }
 
     dtype_map = {float32: RPUDataType.FLOAT, float16: RPUDataType.HALF}
@@ -109,9 +109,10 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
 
     # Weight modifier
     modifier_name = rpu_config.modifier.type.name
-    if rpu_config.modifier.type.name in modifier_name_conversion:
+    modifier_value = rpu_config.modifier.type.value
+    if modifier_value in modifier_name_conversion:
         remap_per_channel = True
-        modifier_name = modifier_name_conversion[rpu_config.modifier.type.name]
+        modifier_name = modifier_name_conversion[modifier_value]
     aihwkit_rpu_config.modifier.type = AIHWKITWeightModifierType[modifier_name]
     if not rpu_config.modifier.type == WeightModifierType.NONE:
         warnings.warn(f"The weight modifier is active and set to {modifier_name}")
