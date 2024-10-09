@@ -238,6 +238,10 @@ def matmul_kernel(
     # Generate the pointers
     offs_am = pid_m * BLOCK_SIZE_INP + tl.arange(0, BLOCK_SIZE_INP)
     offs_bn = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
+
+    offs_am = tl.max_contiguous(tl.multiple_of(offs_am, BLOCK_SIZE_INP), BLOCK_SIZE_INP)
+    offs_bn = tl.max_contiguous(tl.multiple_of(offs_bn, BLOCK_SIZE_OUT), BLOCK_SIZE_OUT)
+
     offs_assumed_wmax = pid_n * BLOCK_SIZE_OUT + tl.arange(0, BLOCK_SIZE_OUT)
 
     ir_range_lower = 0
@@ -334,20 +338,6 @@ def matmul_kernel(
             # do the MVM
             dot_prod = tl.dot(inp_block, weight_block)
 
-            if out_noise:
-                randn_block = tl.randn(out_noise_seed + pid, output_random_offsets)
-                # we add a N(0,1)*std/sqrt(N_slices * N_K)
-                randn_block = (
-                    assumed_wmax_per_slice
-                    * out_noise_std
-                    / tl.sqrt(num_slices * num_k.to(tl.float32))
-                    * randn_block
-                )
-                # add the noise
-                dot_prod += randn_block
-                # advance the output_random_offsets
-                output_random_offsets += increase_out_offsets_by
-
             # scale back with the input range
             dot_prod = input_range.to(tl.float32) * dot_prod
             per_slice_accumulator = per_slice_accumulator + dot_prod
@@ -359,7 +349,22 @@ def matmul_kernel(
 
             current_lower = current_upper
 
-        # here, the MVM for the slice was completed. We can apply the ADC
+        # here, the MVM for the slice was completed. We can apply the
+        # out_noise and ADC
+        if out_noise:
+            randn_block = tl.randn(out_noise_seed + pid, output_random_offsets)
+            # we add a N(0,1)*std/sqrt(N_slices * N_K)
+            randn_block = (
+                assumed_wmax_per_slice
+                * out_noise_std
+                / tl.sqrt(num_slices * num_k.to(tl.float32))
+                * randn_block
+            )
+            # add the noise
+            per_slice_accumulator += randn_block
+            # advance the output_random_offsets
+            output_random_offsets += increase_out_offsets_by
+
         if out_quant or out_bound > 0:
             # compute the bound
             # we just scale with abs-max of weight
