@@ -338,6 +338,8 @@ class TorchLinear:
                     ) * assumed_wmax.view(
                         1, -1
                     )  # type: ignore[union-attr]
+                    # avoid 0 bound (all weights zero in column) resulting in NaN
+                    bound = bound.clamp_min(1e-5)
                 if apply_out_quantization:
                     out_slice = UniformQuantize.apply(
                         out_slice, rpu_config.forward.out_res, bound, True
