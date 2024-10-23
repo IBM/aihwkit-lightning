@@ -14,7 +14,7 @@
 import os
 from typing import List, Tuple, Union
 from math import sqrt
-from torch import Tensor, randn_like, clamp, zeros_like
+from torch import Tensor, randn_like, clamp, zeros_like, finfo
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
 from aihwkit_lightning.simulator.configs import (
@@ -66,7 +66,12 @@ class UniformQuantize(Function):
             res = alpha / res if res > 1.0 else alpha * res
             assert res > 0, "resolution is <= 0"
         output = inp if inplace else inp.clone()
-        output = output / res
+        clamped_res = (
+            max(finfo(inp.dtype).tiny, res)
+            if isinstance(res, (float, int))
+            else res.clamp_min(finfo(inp.dtype).tiny)
+        )
+        output = output / clamped_res  # avoid zero res entries
         # - Perform explicit rounding
         skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
         if not skip_rounding:
@@ -338,8 +343,6 @@ class TorchLinear:
                     ) * assumed_wmax.view(
                         1, -1
                     )  # type: ignore[union-attr]
-                    # avoid 0 bound (all weights zero in column) resulting in NaN
-                    bound = bound.clamp_min(1e-5)
                 if apply_out_quantization:
                     out_slice = UniformQuantize.apply(
                         out_slice, rpu_config.forward.out_res, bound, True

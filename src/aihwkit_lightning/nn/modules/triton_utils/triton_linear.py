@@ -23,6 +23,9 @@ from aihwkit_lightning.nn.modules.triton_utils.triton_std import sliced_fast_std
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
 
 
+FLOAT32_TINY: tl.constexpr = 1.1754943508222875e-38
+
+
 # fmt: off
 @triton.autotune(
         # pylint: disable=line-too-long
@@ -371,7 +374,10 @@ def matmul_kernel(
             bound = bound_scale * out_bound * input_range.to(tl.float32)
             if out_quant:
                 alpha = (bound.to(tl.float32) * out_res)
-                per_slice_accumulator = per_slice_accumulator / alpha
+                per_slice_accumulator = per_slice_accumulator / tl.where(
+                    alpha == 0.0, FLOAT32_TINY,
+                    alpha
+                )
                 per_slice_accumulator = tl.extra.cuda.libdevice.rint(per_slice_accumulator)
                 per_slice_accumulator = per_slice_accumulator * alpha
 
