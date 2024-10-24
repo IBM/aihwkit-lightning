@@ -1,0 +1,6 @@
+include README.md
+include requirements_dev.txt
+include requirements.txt
+include LICENSE.txt
+include CHANGELOG.md
+include src/aihwkit_lightning/VERSION.txt

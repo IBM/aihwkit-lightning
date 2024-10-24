@@ -78,6 +78,7 @@ setup(
     package_dir={"": "src"},
     packages=find_packages("src"),
     package_data={"aihwkit-lightning": ["VERSION.txt"]},
+    include_package_data=True,
     install_requires=INSTALL_REQUIRES,
     python_requires=">=3.7",
     zip_safe=False,
