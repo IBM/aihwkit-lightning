@@ -5,6 +5,13 @@
 [![Build Status](https://app.travis-ci.com/IBM/aihwkit-lightning.svg?token=nYQJ7muZkSyoDYxxh5yc&branch=main)](https://travis-ci.com/IBM/aihwkit-lightning)
 
 ## Installation
+You can install AIHWKIT-Lightning with
+
+```bash
+pip install git+https://github.com/IBM/aihwkit-lightning.git
+```
+or with
+
 ```bash
 git clone git@github.com:IBM/aihwkit-lightning.git
 cd aihwkit-lightning
