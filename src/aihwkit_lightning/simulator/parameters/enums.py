@@ -35,6 +35,15 @@ class WeightModifierType(Enum):
     ADD_NORMAL_PER_CHANNEL = "AddNormalPerChannel"
     """Additive Gaussian noise per channel."""
 
+    MULTIPLICATIVE = "Multiplicative"
+    """Multiplicative noise."""
+
+    MULTIPLICATIVE_OFFSET = "MultiplicativeOffset"
+    """Multiplicative plus offset noise."""
+
+    MULTIPLICATIVE_OFFSET_PER_CHANNEL = "MultiplicativeOffsetPerChannel"
+    """Multiplicative plus offset noise per channel."""
+
     DISCRETIZE_ADD_NORMAL = "DiscretizeAddNormal"
     """First discretize and then additive Gaussian noise."""
 
