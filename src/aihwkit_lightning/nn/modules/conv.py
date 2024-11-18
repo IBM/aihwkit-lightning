@@ -156,6 +156,19 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         base, extra = divmod(size, n_splits)
         return [base + (i < extra) for i in range(n_splits)]
 
+    @classmethod
+    def move_to_meta(cls, module: _ConvNd):
+        """Move the module to the meta class.
+
+        This is used to move the module to the meta class. This is
+        useful for the conversion of the module to analog.
+
+        Args:
+            module: The module to move to the meta class.
+
+        """
+        module.to(device="meta")
+
     def set_weights(self, weight: Tensor) -> None:
         """Set the weight tensor to the analog crossbar. Creates a copy of the tensors.
 
