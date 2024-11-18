@@ -223,9 +223,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
             module: The module to move to the meta class.
 
         """
-        module.weight.data = module.weight.data.to(device="meta")
-        if module.bias is not None:
-            module.bias.data = module.bias.data.to(device="meta")
+        module.to(device="meta")
 
     def set_weights(self, weight: Tensor) -> None:
         """Set the weight tensor to the analog crossbar. Creates a copy of the tensors.
