@@ -212,19 +212,6 @@ class AnalogLinear(Linear, AnalogLayerBase):
             digital_layer.bias.data = module.bias.data.detach().clone()
         return digital_layer.to(device=module.weight.device, dtype=module.weight.dtype)
 
-    @classmethod
-    def move_to_meta(cls, module: Linear):
-        """Move the module to the meta class.
-
-        This is used to move the module to the meta class. This is
-        useful for the conversion of the module to analog.
-
-        Args:
-            module: The module to move to the meta class.
-
-        """
-        module.to(device="meta")
-
     def set_weights(self, weight: Tensor) -> None:
         """Set the weight tensor to the analog crossbar. Creates a copy of the tensors.
 

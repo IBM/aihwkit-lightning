@@ -73,13 +73,13 @@ class AnalogLayerBase:
                 yield name, layer
 
     @classmethod
-    def move_to_meta(cls, _):
+    def move_to_meta(cls, module):
         """Move the module to the meta class.
 
         This is used to move the module to the meta class. This is
         useful for the conversion of the module to analog.
         """
-        return
+        module.to(device="meta")
 
     def clip_weights(self) -> None:
         """Clip the weights of the analog layers."""
