@@ -119,11 +119,11 @@ You can contact us by opening a new issue in the repository.
 ```
 @inproceedings{
 aihwkitlightning,
-title={AIHWKIT-Lightning: A Scalable HW-Aware Training Toolkit for Analog In-Memory Computing},
-author={Julian Büchel and William Andrew Simon and Corey Lammie and Giovanni Acampa and Kaoutar El Maghraoui and Manuel Le Gallo and Abu Sebastian},
-booktitle={NeurIPS 2024 Workshop Machine Learning with new Compute Paradigms},
-year={2024},
-url={https://openreview.net/forum?id=QNdxOgGmhR}
+    title={AIHWKIT-Lightning: A Scalable HW-Aware Training Toolkit for Analog In-Memory Computing},
+    author={Julian Büchel and William Andrew Simon and Corey Lammie and Giovanni Acampa and Kaoutar El Maghraoui and Manuel Le Gallo and Abu Sebastian},
+    booktitle={NeurIPS 2024 Workshop Machine Learning with new Compute Paradigms},
+    year={2024},
+    url={https://openreview.net/forum?id=QNdxOgGmhR}
 }
 ```
 
