@@ -50,6 +50,7 @@ class UniformQuantize(Function):
         Returns:
             torch.Tensor: Quantized input.
         """
+        del ctx
         # - Compute 1 / states if the number of states are provided
         alpha = 2 * bound
         if isinstance(res, Tensor) or isinstance(alpha, Tensor):

@@ -405,7 +405,7 @@ class AnalogConv1d(_AnalogConvNd):
             module.bias is not None,
             module.padding_mode,
         )
-        digital_layer.weight.data = module.weight.data.detach().clone()
+        digital_layer.weight.data = module.weight.data.detach().clone().squeeze(2)
         if module.bias is not None:
             assert digital_layer.bias is not None, "Bias must be present"
             digital_layer.bias.data = module.bias.data.detach().clone()

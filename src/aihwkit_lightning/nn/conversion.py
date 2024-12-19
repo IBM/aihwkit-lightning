@@ -19,7 +19,7 @@ model containing analog layers.
 from typing import Optional, Dict, Callable, Set, List, Union
 from copy import deepcopy
 
-from torch.nn import Module, Linear, Conv1d, Conv2d, Sequential, LSTM
+from torch.nn import Module, Linear, Conv1d, Conv2d, Sequential, LSTM, GRU, RNN
 
 from aihwkit_lightning.exceptions import ArgumentError
 from aihwkit_lightning.nn.modules.container import AnalogWrapper
@@ -39,6 +39,8 @@ _DEFAULT_CONVERSION_MAP = {
     Conv2d: AnalogConv2d,
     Sequential: AnalogSequential,
     LSTM: AnalogRNN,
+    GRU: AnalogRNN,
+    RNN: AnalogRNN,
 }
 _DEFAULT_DIGITAL_CONVERSION_SET = {*_DEFAULT_CONVERSION_MAP.values()}
 
