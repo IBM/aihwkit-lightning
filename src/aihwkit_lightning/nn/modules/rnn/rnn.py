@@ -361,7 +361,7 @@ class AnalogRNN(AnalogContainerBase, Module):
             stem, suffix = key.rsplit(".", 1)
             layer = re.search(r"h_l(\d+)", key).groups()[0]
             i_h = re.search("(hh|ih)", key).groups()[0]
-            r_str = r"((weight|bias|x_min|x_max|input_range|input_range_update_idx))"
+            r_str = r"((weight|bias|x_min|x_max|input_range_update_idx|input_range))"
             tensor_name = re.search(r_str, key).groups()[0]
             direction = 1 if "_reverse" in suffix else 0
             b_dir = f".directions.{direction}" if hasattr(self.rnn.layers[0], "directions") else ""
