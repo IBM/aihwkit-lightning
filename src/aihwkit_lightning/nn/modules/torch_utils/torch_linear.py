@@ -514,6 +514,19 @@ class TorchLinear:
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
+        elif modifier.type in [
+            WeightModifierType.MULTIPLICATIVE_OFFSET,
+            WeightModifierType.MULTIPLICATIVE_OFFSET_PER_CHANNEL,
+        ]:
+            with no_grad():
+                noise = (
+                    modifier.std_dev * inp_weight.abs() + assumed_wmax * modifier.offset
+                ) * randn_like(inp_weight)
+            inp_weight = inp_weight + noise
+        elif modifier.type == WeightModifierType.MULTIPLICATIVE:
+            with no_grad():
+                noise = modifier.std_dev * inp_weight.abs() * randn_like(inp_weight)
+            inp_weight = inp_weight + noise
         else:
             raise ConfigError(f"Weight modifier {modifier} not supported")
         return inp_weight
