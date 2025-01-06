@@ -18,10 +18,15 @@ from typing import Union
 from pytest import mark
 from torch import Tensor, randn, allclose, save, load
 from torch import device as torch_device
-from torch.nn import Module, Linear, Conv1d, Conv2d, LSTM
+from torch.nn import Module, Linear, Conv1d, Conv2d, RNN, LSTM, GRU
 from torch.optim import AdamW
 from aihwkit_lightning.nn import AnalogLinear, AnalogConv1d, AnalogConv2d, AnalogRNN
-from aihwkit_lightning.nn.conversion import AnalogWrapper, convert_to_analog
+from aihwkit_lightning.nn.modules.rnn.cells import (
+    AnalogVanillaRNNCell,
+    AnalogLSTMCell,
+    AnalogGRUCell,
+)
+from aihwkit_lightning.nn.conversion import AnalogWrapper, convert_to_analog, convert_to_digital
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from aihwkit_lightning.optim import AnalogOptimizer
 
@@ -35,8 +40,10 @@ class Model(Module):
         self.conv2 = Conv2d(in_channels=3, out_channels=10, kernel_size=3)
         self.fc1 = Linear(10, 10)
         self.fc2 = Linear(10, 10)
-        self.lstm1 = LSTM(10, 10, 1, bidirectional=False)
-        self.lstm2 = LSTM(10, 20, 3, bidirectional=True)
+        self.gru1 = GRU(10, 10, 1, bidirectional=False)
+        self.lstm1 = LSTM(10, 20, 3, bidirectional=True)
+        self.lstm2 = LSTM(40, 20, 3, bias=False, bidirectional=True)
+        self.rnn1 = RNN(40, 20, 3, dropout=0.1, bidirectional=False)
 
     def forward(self, x: Tensor):
         """
@@ -55,8 +62,10 @@ class Model(Module):
         x = self.fc1(x)
         x = self.fc2(x)
         x = x.permute(1, 0, 2)
+        x, _ = self.gru1(x)
         x, _ = self.lstm1(x)
         x, _ = self.lstm2(x)
+        x, _ = self.rnn1(x)
         return x
 
 
@@ -64,7 +73,7 @@ class Model(Module):
 @mark.parametrize("ensure_analog_root", [True, False])
 @mark.parametrize("exclude_modules", [None, "fc2"])
 @mark.parametrize("inplace", [True, False])
-def test_conversion(
+def test_conversion_to_analog(
     conversion_map: Union[None, dict],
     ensure_analog_root: bool,
     exclude_modules: Union[None, str],
@@ -90,24 +99,36 @@ def test_conversion(
         assert isinstance(model.fc1, AnalogLinear)
         assert isinstance(model.conv1, AnalogConv1d)
         assert isinstance(model.conv2, AnalogConv2d)
+        assert isinstance(model.gru1, AnalogRNN)
+        assert isinstance(model.gru1.rnn.layers[0].cell, AnalogGRUCell)
         assert isinstance(model.lstm1, AnalogRNN)
+        assert isinstance(model.lstm1.rnn.layers[0].directions[0].cell, AnalogLSTMCell)
         assert isinstance(model.lstm2, AnalogRNN)
+        assert isinstance(model.lstm2.rnn.layers[0].directions[0].cell, AnalogLSTMCell)
+        assert isinstance(model.rnn1, AnalogRNN)
+        assert isinstance(model.rnn1.rnn.layers[0].cell, AnalogVanillaRNNCell)
     if conversion_map == {}:
         assert isinstance(analog_model.fc1, Linear)
         assert isinstance(analog_model.fc2, Linear)
         assert isinstance(analog_model.conv1, Conv1d)
         assert isinstance(analog_model.conv2, Conv2d)
+        assert isinstance(analog_model.gru1, GRU)
         assert isinstance(analog_model.lstm1, LSTM)
         assert isinstance(analog_model.lstm2, LSTM)
+        assert isinstance(analog_model.rnn1, RNN)
     if not inplace:
         assert isinstance(model.fc1, Linear) and model.fc1.weight.device == torch_device("cpu")
         assert isinstance(model.fc2, Linear) and model.fc2.weight.device == torch_device("cpu")
         assert isinstance(model.conv1, Conv1d) and model.conv1.weight.device == torch_device("cpu")
         assert isinstance(model.conv2, Conv2d) and model.conv2.weight.device == torch_device("cpu")
-        assert isinstance(model.lstm1, LSTM)
-        assert model.lstm1.weight_hh_l0.device == torch_device("cpu")
-        assert isinstance(model.lstm2, LSTM)
-        assert model.lstm2.weight_hh_l0.device == torch_device("cpu")
+        assert isinstance(model.gru1, GRU) and model.gru1.weight_hh_l0.device == torch_device("cpu")
+        assert isinstance(model.lstm1, LSTM) and model.lstm1.weight_hh_l0.device == torch_device(
+            "cpu"
+        )
+        assert isinstance(model.lstm2, LSTM) and model.lstm2.weight_hh_l0.device == torch_device(
+            "cpu"
+        )
+        assert isinstance(model.rnn1, RNN) and model.rnn1.weight_hh_l0.device == torch_device("cpu")
     if ensure_analog_root:
         assert isinstance(analog_model, AnalogWrapper)
     else:
@@ -119,8 +140,61 @@ def test_conversion(
         assert isinstance(analog_model.fc1, AnalogLinear)
         assert isinstance(analog_model.fc2, Linear)
         assert not isinstance(analog_model.fc2, AnalogLinear)
+        assert isinstance(analog_model.gru1, AnalogRNN)
         assert isinstance(analog_model.lstm1, AnalogRNN)
         assert isinstance(analog_model.lstm2, AnalogRNN)
+        assert isinstance(analog_model.rnn1, AnalogRNN)
+
+
+@mark.parametrize("conversion_map", [None, set()])
+@mark.parametrize("inplace", [True, False])
+def test_conversion_to_digital(conversion_map: Union[None, set], inplace: bool):
+    """
+    Test the correctness of the conversion to digital.
+    """
+    # Create analog model
+    model = convert_to_analog(Model(), rpu_config=TorchInferenceRPUConfig(), inplace=False)
+    # Convert the model to digital
+    digital_model = convert_to_digital(model, conversion_map, inplace=inplace)
+
+    if inplace and conversion_map != set():
+        assert isinstance(model.fc1, Linear)
+        assert isinstance(model.conv1, Conv1d)
+        assert isinstance(model.conv2, Conv2d)
+        assert isinstance(model.gru1, GRU)
+        assert isinstance(model.lstm1, LSTM)
+        assert isinstance(model.lstm2, LSTM)
+        assert isinstance(model.rnn1, RNN)
+    if conversion_map == set():
+        assert isinstance(digital_model.fc1, AnalogLinear)
+        assert isinstance(digital_model.fc2, AnalogLinear)
+        assert isinstance(digital_model.conv1, AnalogConv1d)
+        assert isinstance(digital_model.conv2, AnalogConv2d)
+        assert isinstance(digital_model.gru1, AnalogRNN)
+        assert isinstance(digital_model.gru1.rnn.layers[0].cell, AnalogGRUCell)
+        assert isinstance(digital_model.lstm1, AnalogRNN)
+        assert isinstance(digital_model.lstm1.rnn.layers[0].directions[0].cell, AnalogLSTMCell)
+        assert isinstance(digital_model.lstm2, AnalogRNN)
+        assert isinstance(digital_model.lstm2.rnn.layers[0].directions[0].cell, AnalogLSTMCell)
+        assert isinstance(digital_model.rnn1, AnalogRNN)
+        assert isinstance(digital_model.rnn1.rnn.layers[0].cell, AnalogVanillaRNNCell)
+    if not inplace:
+        assert isinstance(model.fc1, AnalogLinear)
+        assert isinstance(model.fc2, AnalogLinear)
+        assert isinstance(model.conv1, AnalogConv1d)
+        assert isinstance(model.conv2, AnalogConv2d)
+        assert isinstance(model.gru1, AnalogRNN)
+        assert isinstance(model.lstm1, AnalogRNN)
+        assert isinstance(model.lstm2, AnalogRNN)
+        assert model.fc1.weight.device == torch_device("cpu")
+        assert model.fc2.weight.device == torch_device("cpu")
+        assert model.conv1.weight.device == torch_device("cpu")
+        assert model.conv2.weight.device == torch_device("cpu")
+        assert model.gru1.rnn.layers[0].cell.weight_hh.weight.device == torch_device("cpu")
+        assert model.lstm1.rnn.layers[0].directions[0].cell.weight_hh.weight.device == torch_device(
+            "cpu"
+        )
+        assert model.rnn1.rnn.layers[0].cell.weight_hh.weight.device == torch_device("cpu")
 
 
 def test_optimizer_state():
@@ -136,6 +210,9 @@ def test_optimizer_state():
     analog_model = convert_to_analog(model, rpu_config=rpu_config)
     analog_model.load_state_dict(model_sd)
 
+    # convert the model back to digitral and load the state dict
+    digital_model = convert_to_digital(analog_model)
+
     # create a normal optimizer
     normal_optim = AdamW(model.parameters(), lr=0.01)
     normal_loss = model(inp)
@@ -148,7 +225,11 @@ def test_optimizer_state():
     loss.sum().backward()
     optim.step()
 
+    # infer from digital converted network
+    digital_loss = digital_model(inp)
+
     allclose(loss, normal_loss, atol=1e-5)
+    allclose(digital_loss, normal_loss, atol=1e-5)
     allclose(
         optim.state_dict()["state"][0]["exp_avg"],
         normal_optim.state_dict()["state"][0]["exp_avg"],
@@ -181,7 +262,7 @@ def test_save_and_load_state():
         tmp.seek(0)
 
         # Load the model state dict from the temporary file
-        loaded_state_dict = load(tmp)
+        loaded_state_dict = load(tmp, weights_only=False)
 
     analog_model.load_state_dict(loaded_state_dict)
 

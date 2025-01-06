@@ -19,12 +19,18 @@ import re
 
 from typing import Any, List, Optional, Tuple, Type, Callable, Union
 from torch import Tensor, jit
-from torch.nn import Dropout, ModuleList, init, Module, Linear, LSTM
+import torch
+from torch.nn import Dropout, ModuleList, init, Module, Linear, LSTM, GRU, RNN
 from torch.autograd import no_grad
 
 from aihwkit_lightning.nn.modules.container import AnalogContainerBase
 from aihwkit_lightning.nn.modules.linear import AnalogLinear
-from aihwkit_lightning.nn.modules.rnn.cells import AnalogLSTMCell, LSTMState
+from aihwkit_lightning.nn.modules.rnn.cells import (
+    LSTMState,
+    AnalogLSTMCell,
+    AnalogGRUCell,
+    AnalogVanillaRNNCell,
+)
 from aihwkit_lightning.nn.modules.rnn.layers import AnalogRNNLayer, AnalogBidirRNNLayer
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from .layers import AnalogRNNLayer, AnalogBidirRNNLayer
@@ -200,6 +206,7 @@ class AnalogRNN(AnalogContainerBase, Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.batch_first = batch_first
+        self.dropout = dropout
         self.bidirectional = bidir
         self.reset_parameters(xavier)
         self._register_load_state_dict_pre_hook(self.update_state_dict)
@@ -284,12 +291,12 @@ class AnalogRNN(AnalogContainerBase, Module):
                 f"RNN: Expected input to be 2D or 3D, got {inp.dim()}D tensor instead"
             )
         batch_dim = 0 if self.batch_first else 1
-        if states is not None and self.bidirectional:
+        if states is not None:
             flattened_states = states if not self.bidirectional else [b for a in states for b in a]
         if states is not None and len(states) != self.num_layers:
             raise RuntimeError(f"Expecting {self.num_layers} states, but received {len(states)}")
 
-        if not inp.dim() == 3:
+        if inp.dim() != 3:
             inp = inp.unsqueeze(batch_dim)
             if states is not None:
                 for state in flattened_states:
@@ -349,16 +356,16 @@ class AnalogRNN(AnalogContainerBase, Module):
         """Convert Pytorch LSTM state dict to what AnalogRNN expects"""
         if not any("h_l" in a.rsplit(".", 1)[1] for a in state_dict.keys()):
             return
-        bidir = hasattr(self.rnn.layers[0], "directions")
         old_state_dict = deepcopy(state_dict)
         for key in old_state_dict.keys():
             stem, suffix = key.rsplit(".", 1)
             layer = re.search(r"h_l(\d+)", key).groups()[0]
             i_h = re.search("(hh|ih)", key).groups()[0]
-            weight_bias = re.search("((weight|bias))", key).groups()[0]
+            r_str = r"((weight|bias|x_min|x_max|input_range_update_idx|input_range))"
+            tensor_name = re.search(r_str, key).groups()[0]
             direction = 1 if "_reverse" in suffix else 0
-            b_dir = f".directions.{direction}" if bidir else ""
-            new_key = f"{stem}.rnn.layers.{layer}{b_dir}.cell.weight_{i_h}.{weight_bias}"
+            b_dir = f".directions.{direction}" if hasattr(self.rnn.layers[0], "directions") else ""
+            new_key = f"{stem}.rnn.layers.{layer}{b_dir}.cell.weight_{i_h}.{tensor_name}"
             state_dict[new_key] = state_dict.pop(key)
 
     def return_pytorch_state_dict(self, module, state_dict, prefix, local_metadata):
@@ -378,31 +385,135 @@ class AnalogRNN(AnalogContainerBase, Module):
             pytorch_suffix = f"{prefix}{weight_bias}_{i_h}_l{layer}{reverse}"
             state_dict[pytorch_suffix] = state_dict.pop(key)
 
+    @staticmethod
+    def update_digital_attrs(
+        digital_layer: Union[RNN, LSTM, GRU],
+        analog_cell: Union[AnalogVanillaRNNCell, AnalogLSTMCell, AnalogGRUCell],
+        layer: int,
+        reverse: bool,
+    ):
+        """Update digital weights and (optionally) biases of RNN-type
+        digital layers.
+
+        Args:
+            digital_layer: Digital layer to update
+            analog_cell: Analog cell from which to extract values
+            layer: Sub-layer index
+            reverse: Is this the reverse cell of a bidirectional layer
+        """
+        r_string = "" if not reverse else "_reverse"
+        getattr(digital_layer, f"weight_hh_l{layer}{r_string}").set_(
+            analog_cell.weight_hh.weight.data.detach().clone()
+        )
+        getattr(digital_layer, f"weight_ih_l{layer}{r_string}").set_(
+            analog_cell.weight_ih.weight.data.detach().clone()
+        )
+        if analog_cell.weight_hh.bias is not None:
+            getattr(digital_layer, f"bias_hh_l{layer}{r_string}").set_(
+                analog_cell.weight_hh.bias.data.detach().clone()
+            )
+            getattr(digital_layer, f"bias_ih_l{layer}{r_string}").set_(
+                analog_cell.weight_ih.bias.data.detach().clone()
+            )
+
+    @classmethod
+    def to_digital(cls, module: "AnalogRNN") -> Union[RNN, LSTM, GRU]:
+        """Return an nn.RNN/LSTM/GRU layer from an AnalogRNN layer.
+
+        Args:
+            module: The analog module to convert.
+
+        Returns:
+            a torch RNN/LSTM/GRU layer with the same dimension and weights
+            as the analog version. Type is dependent on underlying cell of
+            AnalogRNN layer
+        """
+        analog_cell = (
+            module.rnn.layers[0].cell
+            if not module.bidirectional
+            else module.rnn.layers[0].directions[0].cell
+        )
+        device = analog_cell.weight_ih.weight.device
+        dtype = analog_cell.weight_ih.weight.dtype
+        has_bias = analog_cell.weight_hh.bias is not None
+        digital_cell: Union[RNN, LSTM, GRU]
+        if isinstance(analog_cell, AnalogVanillaRNNCell):
+            digital_cell = RNN(
+                module.input_size,
+                module.hidden_size,
+                module.num_layers,
+                "tanh",
+                has_bias,
+                module.batch_first,
+                module.dropout,
+                module.bidirectional,
+                device=device,
+                dtype=dtype,
+            )
+        elif isinstance(analog_cell, AnalogLSTMCell):
+            digital_cell = LSTM(
+                module.input_size,
+                module.hidden_size,
+                module.num_layers,
+                has_bias,
+                module.batch_first,
+                module.dropout,
+                module.bidirectional,
+                module.proj_size,
+                device=device,
+                dtype=dtype,
+            )
+        elif isinstance(analog_cell, AnalogGRUCell):
+            digital_cell = GRU(
+                module.input_size,
+                module.hidden_size,
+                module.num_layers,
+                has_bias,
+                module.batch_first,
+                module.dropout,
+                module.bidirectional,
+                device=device,
+                dtype=dtype,
+            )
+        with torch.no_grad():
+            for layer in range(module.num_layers):
+                layer_cell = (
+                    module.rnn.layers[layer].cell
+                    if not module.bidirectional
+                    else module.rnn.layers[layer].directions[0].cell
+                )
+                module.update_digital_attrs(digital_cell, layer_cell, layer, False)
+                if module.bidirectional:
+                    layer_cell = module.rnn.layers[layer].directions[1].cell
+                    module.update_digital_attrs(digital_cell, layer_cell, layer, True)
+
+        return digital_cell.to(device=device, dtype=dtype)
+
     @classmethod
     def from_digital(
         cls,
-        module: LSTM,
+        module: Union[RNN, LSTM, LSTM],
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
         realistic_read_write: bool = False,
     ) -> "AnalogRNN":
-        """Return an AnalogRNN module from a torch LSTM layer.
+        """Return an AnalogRNN module from a torch RNN/LSTM/GRU layer.
 
         Args:
-            module: The torch module to convert. All layers that are
-                defined in the ``conversion_map``.
+            module: The torch module to convert.
             rpu_config: RPU config to use.
             realistic_read_write: whether standard PyTorch LSTM weight
             initialization (default) or Xavier initialization
 
         Returns:
-            an AnalogRNN module based on the digital LSTM ``module``.
+            an AnalogRNN module with the correct underlying cell type based on ``module``.
         """
+        cell_mapping = {RNN: AnalogVanillaRNNCell, GRU: AnalogGRUCell, LSTM: AnalogLSTMCell}
         analog_module = AnalogRNN(
-            AnalogLSTMCell,
+            cell_mapping[type(module)],
             module.input_size,
             module.hidden_size,
             module.num_layers,
-            module.bias is not None,
+            module.bias is not False,
             module.batch_first,
             module.bidirectional,
             module.dropout,
@@ -414,25 +525,38 @@ class AnalogRNN(AnalogContainerBase, Module):
         )
         for i, layer in enumerate(analog_module.rnn.layers):
             if analog_module.bidirectional:
+                biases = (
+                    [
+                        getattr(module, f"bias_ih_l{i}"),
+                        getattr(module, f"bias_hh_l{i}"),
+                        getattr(module, f"bias_ih_l{i}_reverse"),
+                        getattr(module, f"bias_hh_l{i}_reverse"),
+                    ]
+                    if module.bias is not False
+                    else [None, None, None, None]
+                )
                 layer.directions[0].cell.weight_ih.set_weights_and_biases(
-                    getattr(module, f"weight_ih_l{i}"), getattr(module, f"bias_ih_l{i}")
+                    getattr(module, f"weight_ih_l{i}"), biases[0]
                 )
                 layer.directions[0].cell.weight_hh.set_weights_and_biases(
-                    getattr(module, f"weight_hh_l{i}"), getattr(module, f"bias_hh_l{i}")
+                    getattr(module, f"weight_hh_l{i}"), biases[1]
                 )
                 layer.directions[1].cell.weight_ih.set_weights_and_biases(
-                    getattr(module, f"weight_ih_l{i}_reverse"),
-                    getattr(module, f"bias_ih_l{i}_reverse"),
+                    getattr(module, f"weight_ih_l{i}_reverse"), biases[2]
                 )
                 layer.directions[1].cell.weight_hh.set_weights_and_biases(
-                    getattr(module, f"weight_hh_l{i}_reverse"),
-                    getattr(module, f"bias_hh_l{i}_reverse"),
+                    getattr(module, f"weight_hh_l{i}_reverse"), biases[3]
                 )
             else:
+                biases = (
+                    [getattr(module, f"bias_ih_l{i}"), getattr(module, f"bias_hh_l{i}")]
+                    if module.bias is not False
+                    else [None, None]
+                )
                 layer.cell.weight_ih.set_weights_and_biases(
-                    getattr(module, f"weight_ih_l{i}"), getattr(module, f"bias_ih_l{i}")
+                    getattr(module, f"weight_ih_l{i}"), biases[0]
                 )
                 layer.cell.weight_hh.set_weights_and_biases(
-                    getattr(module, f"weight_hh_l{i}"), getattr(module, f"bias_hh_l{i}")
+                    getattr(module, f"weight_hh_l{i}"), biases[1]
                 )
         return analog_module
