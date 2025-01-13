@@ -384,8 +384,12 @@ class TorchLinear:
                 std = values.std()
                 if std > 0.0:
                     input_range.data[slice_idx] = (
-                        input_range.data[slice_idx] * idx + ir_params.init_std_alpha * std
-                    ) / (idx + 1)
+                        (
+                            input_range.data[slice_idx].float() * idx
+                            + ir_params.init_std_alpha * std.float()
+                        )
+                        / (idx + 1)
+                    ).to(dtype=input_range.dtype)
                     input_range_update_idx[slice_idx] += 1
                 input_range.data[slice_idx] = input_range.data[slice_idx].abs()
 
