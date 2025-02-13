@@ -30,12 +30,13 @@ class WeightModifierParameter(_PrintableMixin):
 
     This parameter affects the modifier types ``AddNormal``, ``MultNormal`` and
     ``DiscretizeAddNormal``.
+    """
 
-    Note:
-        If the parameter ``rel_to_actual_wmax`` is set then the ``std_dev`` is
-        computed in relative terms to the abs max of the given weight matrix,
-        otherwise it in relative terms to the assumed max, which is set by
-        ``assumed_wmax``.
+    offset: float = 0.0
+    """Offset of the standard deviation of the noise.
+
+    This parameter affects the modifier types ``MultiplicativeOffset``, and
+    ``MultiplicativeOffsetPerChannel``.
     """
 
     res: float = 0.0
