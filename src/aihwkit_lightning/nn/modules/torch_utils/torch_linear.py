@@ -61,6 +61,7 @@ class UniformQuantize(Function):
                     err_string = f"res is tensor but first dim {res.size(0)} mismatches with first dim of input: {inp.size(0)}"  # noqa: E501
                     assert res.size(0) == inp.size(0), err_string
                 res = alpha / res if (res > 1.0).all() else alpha * res
+                res[res == 0.0] = 1.0  # avoid division by zero
                 assert (res > 0).all(), "resolution is <= 0"
         else:
             res = alpha / res if res > 1.0 else alpha * res
@@ -502,7 +503,7 @@ class TorchLinear:
             WeightModifierType.DISCRETIZE_PER_CHANNEL,
         ]:
             # - Discretize the weights on the fly and backprob through them
-            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, True)
+            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, False)
         elif modifier.type in [
             WeightModifierType.ADD_NORMAL,
             WeightModifierType.ADD_NORMAL_PER_CHANNEL,
@@ -514,7 +515,7 @@ class TorchLinear:
             WeightModifierType.DISCRETIZE_ADD_NORMAL,
             WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
         ]:
-            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, True)
+            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, False)
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
