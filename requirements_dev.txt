@@ -4,3 +4,4 @@ pycodestyle==2.11.1
 black==24.3.0
 transformers
 datasets
+pytest

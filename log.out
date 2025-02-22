@@ -1,0 +1,7 @@
+pytest -v -s tests/
+pytest -v -s tests/
+============================= test session starts ==============================
+platform linux -- Python 3.10.16, pytest-6.2.4, py-1.11.0, pluggy-0.13.1 -- /u/jub/miniconda3/envs/torch/bin/python
+cachedir: .pytest_cache
+rootdir: /u/jub/aihwkit-lightning
+collecting ... 
