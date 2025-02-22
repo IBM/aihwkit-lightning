@@ -82,6 +82,10 @@ def fixture_ir_learn_input_range(request) -> bool:
     """Learn input range parameter"""
     return request.param
 
+@fixture(scope="module", name="ir_dynamic")
+def fixture_ir_dynamic(request) -> bool:
+    """Dynamic input range"""
+    return request.param
 
 @fixture(scope="module", name="ir_init_value")
 def fixture_ir_init_value(request) -> float:
@@ -111,6 +115,7 @@ def fixture_adc_config(request) -> Tuple[float, float]:
 def fixture_rpus(
     max_inp_size: int,
     ir_enable_inp_res: Tuple[bool, float],
+    ir_dynamic: bool,
     ir_learn_input_range: bool,
     ir_init_value: float,
     ir_init_from_data: int,
@@ -125,17 +130,26 @@ def fixture_rpus(
     for rpu_config in [aihwkit_rpu_config, lightning_rpu_config]:
         if isinstance(rpu_config, AIHWKITRPUConfig):
             rpu_config.mapping.max_output_size = -1
-            rpu_config.forward.noise_management = NoiseManagementType.NONE
+            if ir_dynamic:
+                rpu_config.forward.noise_management = NoiseManagementType.ABS_MAX
+                rpu_config.pre_post.input_range.enable = False
+            else:
+                rpu_config.forward.noise_management = NoiseManagementType.NONE
+                rpu_config.pre_post.input_range.enable = ir_enable
             rpu_config.forward.bound_management = BoundManagementType.NONE
             if not ir_enable:
                 rpu_config.forward.inp_bound = -1
+        elif isinstance(rpu_config, RPUConfig):
+            rpu_config.pre_post.input_range.dynamic = ir_dynamic
+            rpu_config.pre_post.input_range.enable = ir_enable
+        else:
+            raise Exception(f"Unknown rpu config type {rpu_config}.")
 
         rpu_config.forward.inp_res = inp_res
         rpu_config.forward.out_res = out_res
         rpu_config.forward.out_bound = out_bound
         rpu_config.forward.out_noise = 0.0
         rpu_config.mapping.max_input_size = max_inp_size
-        rpu_config.pre_post.input_range.enable = ir_enable
         rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
         rpu_config.pre_post.input_range.init_value = ir_init_value
         rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
@@ -175,6 +189,7 @@ bsz_num_inp_dims_parameters = [
 @mark.parametrize(
     "ir_enable_inp_res", [(True, 2**8 - 2), (True, 1 / (2**8 - 2))], ids=str, indirect=True
 )
+@mark.parametrize("ir_dynamic", [True, False], indirect=True)
 @mark.parametrize("ir_learn_input_range", [True], indirect=True)
 @mark.parametrize("ir_init_value", [2.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
@@ -262,6 +277,7 @@ def test_linear_forward(
 @mark.parametrize("bias", [True])
 @mark.parametrize("max_inp_size", [256, 512], indirect=True)
 @mark.parametrize("ir_enable_inp_res", [(True, 2**8 - 2)], ids=str, indirect=True)
+@mark.parametrize("ir_dynamic", [True, False], indirect=True)
 @mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
 @mark.parametrize("ir_init_value", [3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [10], indirect=True)
@@ -413,7 +429,7 @@ layers_dropout_parameters = [
 ]
 
 
-@mark.parametrize("bsz", [0, 1, 3])
+@mark.parametrize("bsz", [0, 1, 2])
 @mark.parametrize(
     "cell_type", [AnalogVanillaRNNCell, AnalogLSTMCell, AnalogLSTMCellCombinedWeight, AnalogGRUCell]
 )
@@ -428,6 +444,7 @@ layers_dropout_parameters = [
 @mark.parametrize("realistic_read_write", [True])
 @mark.parametrize("max_inp_size", [10], indirect=True)
 @mark.parametrize("ir_enable_inp_res", [(True, 2**8 - 2)], ids=str, indirect=True)
+@mark.parametrize("ir_dynamic", [True, False], indirect=True)
 @mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
 @mark.parametrize("ir_init_value", [3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [10], indirect=True)
@@ -587,6 +604,7 @@ def test_clipping(
 @mark.parametrize(
     "ir_enable_inp_res", [(True, 2**8 - 2), (True, 1 / (2**8 - 2))], ids=str, indirect=True
 )
+@mark.parametrize("ir_dynamic", [True, False], indirect=True)
 @mark.parametrize("ir_learn_input_range", [True], indirect=True)
 @mark.parametrize("max_inp_size", [32], indirect=True)
 @mark.parametrize("ir_init_value", [2.0], indirect=True)
@@ -608,10 +626,7 @@ def test_backward(
     """Test the input range backward pass."""
 
     manual_seed(0)
-
     aihwkit_rpu, rpu = rpus
-    aihwkit_rpu.forward.noise_management = NoiseManagementType.NONE
-
     aihwkit_linear = AIHWKITAnalogLinear(
         in_features=inp_size, out_features=out_size, bias=bias, rpu_config=aihwkit_rpu
     )
@@ -655,7 +670,13 @@ def test_backward(
     out.sum().backward()
 
     atol = 1e-4
-    assert allclose(inp_aihwkit.grad, inp.grad, atol=atol), "grad w.r.t. the input not matching"
+    
+    # aihwkit simulator/tiles/analog_mvm.py l. 306 and l. 115, if these
+    # calls are wrapped in no_grad (i.e. ignore the scaling and re-scaling)
+    # the gradients would be exactly the same. we don't apply scaling and
+    # re-scaling of the inputs and outputs
+    no_check = inp.abs() == inp.abs().amax(-1, keepdim=True)
+    assert allclose(inp_aihwkit.grad[~no_check], inp.grad[~no_check], atol=atol), "grad w.r.t. the input not matching"
     assert allclose(out_aihwkit, out, atol=atol)
 
 
@@ -872,46 +893,47 @@ if __name__ == "__main__":
     test_rpus = fixture_rpus(
         max_inp_size=256,
         ir_enable_inp_res=(True, 254),
+        ir_dynamic=True,
         ir_learn_input_range=True,
         ir_init_value=3.0,
         ir_init_from_data=10,
-        ir_init_std_alpha=3.0,
+        ir_init_std_alpha=2.0,
         adc_config=(-1, -1),
     )
-    test_conv2d_forward(
-        bsz=1,
-        num_inp_dims=1,
-        height=10,
-        width=10,
-        in_channels=3,
-        out_channels=3,
-        kernel_size=(3, 3),
-        stride=(1, 1),
-        padding=(1, 1),
-        dilation=(1, 1),
-        groups=1,
-        bias=True,
-        device=torch_device("cuda"),
-        dtype=float32,
-        rpus=test_rpus,
-    )
-    # test_backward(
-    #     bsz=2,
-    #     num_inp_dims=3,
-    #     inp_size=64,
-    #     out_size=64,
+    # test_conv2d_forward(
+    #     bsz=1,
+    #     num_inp_dims=1,
+    #     height=10,
+    #     width=10,
+    #     in_channels=3,
+    #     out_channels=3,
+    #     kernel_size=(3, 3),
+    #     stride=(1, 1),
+    #     padding=(1, 1),
+    #     dilation=(1, 1),
+    #     groups=1,
     #     bias=True,
     #     device=torch_device("cuda"),
     #     dtype=float32,
     #     rpus=test_rpus,
     # )
+    test_backward(
+        bsz=1,
+        num_inp_dims=2,
+        inp_size=32,
+        out_size=32,
+        bias=False,
+        device=torch_device("cpu"),
+        dtype=float32,
+        rpus=test_rpus,
+    )
     # test_linear_forward(
-    #     bsz=2,
-    #     num_inp_dims=3,
+    #     bsz=1,
+    #     num_inp_dims=1,
     #     inp_size=64,
     #     out_size=64,
     #     bias=True,
-    #     device=torch_device("cuda"),
-    #     dtype=float16,
+    #     device=torch_device("cpu"),
+    #     dtype=float32,
     #     rpus=test_rpus,
     # )

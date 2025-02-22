@@ -17,8 +17,7 @@
 from typing import Optional, Tuple, Union, List
 import os
 from functools import reduce
-from torch import Tensor, cuda, empty, zeros, tensor, int32
-from torch.nn import Parameter
+from torch import Tensor, cuda, tensor, int32
 from torch.nn.functional import unfold
 from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d
 from torch.nn.modules.utils import _single, _pair
@@ -95,6 +94,10 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             dtype,
         )
 
+        if str(device) == "meta":
+            # init these small values on cpu
+            device = "cpu"
+
         self.in_features = self.get_tile_size(in_channels, groups, kernel_size)
         self.out_features = out_channels
         self.rpu_config = rpu_config
@@ -106,34 +109,12 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             .contiguous()
         )
 
-        if rpu_config.pre_post.input_range.enable:
-            # for every vertical tile, we have an input range
-            self.input_range = Parameter(
-                data=empty((len(self.in_sizes),), dtype=dtype, device=device).fill_(
-                    rpu_config.pre_post.input_range.init_value
-                ),
-                requires_grad=rpu_config.pre_post.input_range.learn_input_range,
-            )
-            self.register_buffer(
-                "input_range_update_idx",
-                tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device),
-            )
-            # needed for the fast mode
-            self.register_buffer(
-                "x_min", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
-            )
-            self.register_buffer(
-                "x_max", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
-            )
-            self.x_min: Tensor
-            self.x_min -= 1e-5
-            self.x_max: Tensor
-            self.x_max += 1e-5
-        else:
-            self.input_range = None  # type: ignore[assignment]
-            self.input_range_update_idx = None  # type: ignore[assignment]
-            self.x_min = None  # type: ignore[assignment]
-            self.x_max = None  # type: ignore[assignment]
+        self.init_ir(
+            init_value_ir=self.rpu_config.pre_post.input_range.init_value,
+            init_value_counter=0,
+            device=device,
+            dtype=dtype,
+        )
 
     def get_tile_size(self, in_channels: int, groups: int, kernel_size: Tuple[int, ...]) -> int:
         """Calculate the tile size."""
