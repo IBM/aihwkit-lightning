@@ -11,11 +11,12 @@
 # that they have been altered from the originals.
 
 """Base class for adding functionality to analog layers."""
-from typing import Tuple, Generator, Callable
+from typing import Tuple, Generator, Callable, List, Any
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch.nn import Parameter
 from torch import Tensor, empty, zeros
+from ...simulator.configs import TorchInferenceRPUConfig
 
 
 class AnalogLayerBase:
@@ -24,6 +25,10 @@ class AnalogLayerBase:
     In general, the defined methods will be looped for all analog tile
     modules and delegate the function.
     """
+
+    rpu_config: TorchInferenceRPUConfig
+    in_sizes: List[int]
+    register_buffer: Any
 
     IS_CONTAINER: bool = False
     """Class constant indicating whether sub-layers exist or whether
@@ -94,7 +99,7 @@ class AnalogLayerBase:
         device: torch_device,
         dtype: torch_dtype,
         init_value_ir: float,
-        init_value_counter: int = 0
+        init_value_counter: int = 0,
     ):
         """Initialize input range parameters."""
 
@@ -107,17 +112,17 @@ class AnalogLayerBase:
                 data=empty((len(self.in_sizes),), dtype=dtype, device=device).fill_(init_value_ir),
                 requires_grad=self.rpu_config.pre_post.input_range.learn_input_range,
             )
-            self.register_buffer(
+            self.register_buffer(  # type: ignore[call-arg]
                 "input_range_update_idx",
                 tensor=empty((len(self.in_sizes),), dtype=dtype, device=device).fill_(
                     init_value_counter
                 ),
             )
             # needed for the fast mode
-            self.register_buffer(
+            self.register_buffer(  # type: ignore[call-arg]
                 "x_min", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
             )
-            self.register_buffer(
+            self.register_buffer(  # type: ignore[call-arg]
                 "x_max", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
             )
             self.x_min: Tensor

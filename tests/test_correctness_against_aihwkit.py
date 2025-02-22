@@ -82,10 +82,12 @@ def fixture_ir_learn_input_range(request) -> bool:
     """Learn input range parameter"""
     return request.param
 
+
 @fixture(scope="module", name="ir_dynamic")
 def fixture_ir_dynamic(request) -> bool:
     """Dynamic input range"""
     return request.param
+
 
 @fixture(scope="module", name="ir_init_value")
 def fixture_ir_init_value(request) -> float:
@@ -670,13 +672,15 @@ def test_backward(
     out.sum().backward()
 
     atol = 1e-4
-    
+
     # aihwkit simulator/tiles/analog_mvm.py l. 306 and l. 115, if these
     # calls are wrapped in no_grad (i.e. ignore the scaling and re-scaling)
     # the gradients would be exactly the same. we don't apply scaling and
     # re-scaling of the inputs and outputs
     no_check = inp.abs() == inp.abs().amax(-1, keepdim=True)
-    assert allclose(inp_aihwkit.grad[~no_check], inp.grad[~no_check], atol=atol), "grad w.r.t. the input not matching"
+    assert allclose(
+        inp_aihwkit.grad[~no_check], inp.grad[~no_check], atol=atol
+    ), "grad w.r.t. the input not matching"
     assert allclose(out_aihwkit, out, atol=atol)
 
 

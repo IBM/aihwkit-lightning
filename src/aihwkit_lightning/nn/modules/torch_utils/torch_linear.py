@@ -212,14 +212,13 @@ class TorchLinear:
 
             if rpu_config.pre_post.input_range.enable:
                 is_dynamic = rpu_config.pre_post.input_range.dynamic
-                assert is_dynamic or input_range is not None, "Input range must be provided"
-                assert (
-                    is_dynamic or input_range_update_idx is not None
-                ), "Input range update index must be provided"
-
                 if rpu_config.pre_post.input_range.fast_mode:
                     assert x_min is not None, "x_min must be provided"
                     assert x_max is not None, "x_max must be provided"
+                    assert input_range is not None, "Input range must be provided"
+                    assert (
+                        input_range_update_idx is not None
+                    ), "Input range update index must be provided"
                     inp_slice = TorchLinear.apply_input_range_fast(
                         values=inp_slice,
                         slice_idx=slice_idx,
@@ -234,6 +233,10 @@ class TorchLinear:
                     input_range = inp_slice.abs().max(dim=-1, keepdim=True)[0]
                     input_range = stack([input_range for _ in range(len(in_sizes))])
                 else:
+                    assert input_range is not None, "Input range must be provided"
+                    assert (
+                        input_range_update_idx is not None
+                    ), "Input range update index must be provided"
                     inp_slice, upper_thresh, lower_thresh = TorchLinear.apply_input_range(
                         values=inp_slice,
                         slice_idx=slice_idx,
