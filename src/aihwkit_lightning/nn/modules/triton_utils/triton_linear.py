@@ -322,8 +322,16 @@ def matmul_kernel(
 
             if not ir_vector_is_none:
                 # save the correct IR per dimension in the hidden
-                ir_vector_ptrs = ir_vector_ptr + offs_am[:, None] * stride_ir_vector_inp + stride_ir_vector_hidden * offs_k[None, :]
-                tl.store(ir_vector_ptrs, input_range, mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper))
+                ir_vector_ptrs = (
+                    ir_vector_ptr
+                    + offs_am[:, None] * stride_ir_vector_inp
+                    + offs_k[None, :] * stride_ir_vector_hidden
+                )
+                tl.store(
+                    ir_vector_ptrs,
+                    input_range,
+                    mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper)
+                )
 
             # clip between the input ranges
             over_ir_mask = inp_block > input_range
@@ -454,7 +462,12 @@ class TritonLinear(Function):
             Gradients w.r.t. inputs, weights and input ranges.
         """
         ir_dynamic = rpu_config.pre_post.input_range.dynamic
-        assert ir_dynamic or input_range.is_contiguous(), "input_range not contiguous"
+        assert ir_dynamic == input_range is None, "Received input range when dynamic IR"
+        assert ir_dynamic == input_range_update_idx is None, "Received IR counter when dynamic IR"
+
+        if input_range is not None:
+            assert input_range.is_contiguous(), "input_range not contiguous"
+
         assert weights.is_contiguous(), "weights not contiguous"
         assert inp.is_contiguous(), "inp not contiguous"
 
@@ -471,10 +484,10 @@ class TritonLinear(Function):
         num_slices = len(upper_end_of_slices)
 
         # update the input ranges if necessary
-        if training:
+        if training and input_range_update_idx is not None and input_range is not None:
             ir_params = rpu_config.pre_post.input_range
-            if not ir_dynamic and input_range_update_idx[0] < ir_params.init_from_data:
-                # # Avoiding the for loop yields a speed-up.
+            if input_range_update_idx[0] < ir_params.init_from_data:
+                # Avoiding the for loop yields a speed-up.
                 stds = sliced_fast_std(inp, upper_end_of_slices)
                 # if (stds > 0.0).all():
                 #     # stds = naive_per_slice_std(inp, upper_end_of_slices)
@@ -567,20 +580,15 @@ class TritonLinear(Function):
         out_noise_seed = randint(2**31, (1,)).item()
 
         # create an input range vector that has shape [-1, hidden_size]
-        ir_vector = empty(
-            (inp.size(0), hidden_size),
-            device=inp.device,
-            dtype=inp.dtype
-        )
+        ir_vector = empty((inp.size(0), hidden_size), device=inp.device, dtype=inp.dtype)
         ir_vector = ir_vector.contiguous()
 
         # preprocess the input range here to have shape [num_slices, -1]
         # i.e. for every token, we have num_slices many IRs
-        if ir_dynamic:
+        if input_range is None:
             expanded_input_range = sliced_fast_abs_max(inp, upper_end_of_slices=upper_end_of_slices)
         else:
             expanded_input_range = input_range.unsqueeze(1).repeat(num_slices, inp.size(0))
-
 
         # for some tests, we skip rounding
         skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
@@ -637,7 +645,9 @@ class TritonLinear(Function):
 
         # save some stuff for backwards
         ctx.rpu_config = rpu_config  # type: ignore[attr-defined]
-        ctx.save_for_backward(inp, weights, None if ir_dynamic else input_range, ir_vector)
+        ctx.save_for_backward(
+            inp, weights, None if ir_dynamic else input_range, ir_vector  # type: ignore[arg-type]
+        )
 
         out = out.view(out_shape)
         return out

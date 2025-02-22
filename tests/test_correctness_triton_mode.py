@@ -110,7 +110,7 @@ def test_linear_forward(
         # triton and torch. As a result, the outputs might end up
         # in different quantization bins, causing stronger changes
         raise SkipTest("No out_noise when ADC used.")
-    
+
     # turn off rounding as this can lead to large errors as a result
     # of tiny fp errors
     os.environ["_AIHWKIT_NO_ROUNDING"] = "1"
@@ -210,7 +210,7 @@ def test_linear_forward(
         if dtype == float16:
             atol = 1e-2  # accumulation is slightly different in triton vs torch
         assert allclose(out_triton, out, atol=atol)
-    
+
     del os.environ["_AIHWKIT_NO_ROUNDING"]
     del os.environ["AIHWKIT_TESTING"]
 

@@ -43,7 +43,7 @@ def is_at_least_volta_gpu():
 TRITON_AVAIL = False
 try:
     from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
-    
+
     if not os.environ.get("TRITON_INTERPRET", None) == "1":
         # we are not in interpret mode
         if not is_at_least_volta_gpu():
