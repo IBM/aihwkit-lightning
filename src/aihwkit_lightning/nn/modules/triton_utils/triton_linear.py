@@ -462,8 +462,8 @@ class TritonLinear(Function):
             Gradients w.r.t. inputs, weights and input ranges.
         """
         ir_dynamic = rpu_config.pre_post.input_range.dynamic
-        assert ir_dynamic == input_range is None, "Received input range when dynamic IR"
-        assert ir_dynamic == input_range_update_idx is None, "Received IR counter when dynamic IR"
+        assert ir_dynamic == (input_range is None), "Received input range when dynamic IR"
+        assert ir_dynamic == (input_range_update_idx is None), "Received IR counter when dynamic IR"
 
         if input_range is not None:
             assert input_range.is_contiguous(), "input_range not contiguous"

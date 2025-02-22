@@ -157,7 +157,7 @@ def test_linear_forward(
 
     if ir_enable and not ir_dynamic:
         linear.input_range.data = 1.0 + arange(len(linear.in_sizes))
-        linear = linear.to(device=device, dtype=dtype)
+    linear = linear.to(device=device, dtype=dtype)
 
     if num_inp_dims == 1:
         inp = randn(inp_size, device=device, dtype=dtype)
@@ -348,6 +348,6 @@ if __name__ == "__main__":
         weight_modifier=WeightModifierType.NONE,
         weight_modifier_res=254,
         clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-        device="cpu",
+        device="cuda",
         dtype=float32,
     )
