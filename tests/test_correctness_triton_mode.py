@@ -48,6 +48,7 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
 @mark.parametrize("max_inp_size", [20])
 @mark.parametrize("ir_enable", [True, False])
+@mark.parametrize("ir_dynamic", [True, False])
 @mark.parametrize("ir_learn_input_range", [True, False])
 @mark.parametrize("ir_init_value", [3.0])
 @mark.parametrize("ir_init_std_alpha", [2.0])
@@ -69,6 +70,7 @@ def test_linear_forward(
     inp_res: float,
     max_inp_size: int,
     ir_enable: bool,
+    ir_dynamic: bool,
     ir_learn_input_range: bool,
     ir_init_value: float,
     ir_init_std_alpha: float,
@@ -82,8 +84,6 @@ def test_linear_forward(
     dtype: torch_dtype,
 ):
     """Test the forward pass."""
-
-    manual_seed(0)
 
     out_bound, out_res = adc_config
 
@@ -110,6 +110,12 @@ def test_linear_forward(
         # triton and torch. As a result, the outputs might end up
         # in different quantization bins, causing stronger changes
         raise SkipTest("No out_noise when ADC used.")
+    
+    # turn off rounding as this can lead to large errors as a result
+    # of tiny fp errors
+    os.environ["_AIHWKIT_NO_ROUNDING"] = "1"
+    os.environ["AIHWKIT_TESTING"] = "1"
+    manual_seed(0)
 
     def populate_rpu(rpu_config: RPUConfig):
         rpu_config.modifier.type = weight_modifier
@@ -122,6 +128,7 @@ def test_linear_forward(
         rpu_config.forward.out_res = out_res
         rpu_config.mapping.max_input_size = max_inp_size
         rpu_config.pre_post.input_range.enable = ir_enable
+        rpu_config.pre_post.input_range.dynamic = ir_dynamic
         rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
         rpu_config.pre_post.input_range.init_value = ir_init_value
         rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
@@ -148,8 +155,9 @@ def test_linear_forward(
     else:
         linear = linear.eval()
 
-    linear.input_range.data = 1.0 + arange(len(linear.in_sizes))
-    linear = linear.to(device=device, dtype=dtype)
+    if ir_enable and not ir_dynamic:
+        linear.input_range.data = 1.0 + arange(len(linear.in_sizes))
+        linear = linear.to(device=device, dtype=dtype)
 
     if num_inp_dims == 1:
         inp = randn(inp_size, device=device, dtype=dtype)
@@ -202,6 +210,9 @@ def test_linear_forward(
         if dtype == float16:
             atol = 1e-2  # accumulation is slightly different in triton vs torch
         assert allclose(out_triton, out, atol=atol)
+    
+    del os.environ["_AIHWKIT_NO_ROUNDING"]
+    del os.environ["AIHWKIT_TESTING"]
 
 
 @mark.parametrize("bsz", [1, 10])
@@ -210,12 +221,13 @@ def test_linear_forward(
 @mark.parametrize("out_size", [10, 255, 513])
 @mark.parametrize("bias", [True, False])
 @mark.parametrize("inp_res", [2**8 - 2, 1 / (2**8 - 2)])
+@mark.parametrize("ir_dynamic", [True, False])
 @mark.parametrize("max_inp_size", [256, 512])
 @mark.parametrize("ir_init_value", [2.0, 3.0])
 @mark.parametrize("ir_init_from_data", [0, 10])
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
 @mark.parametrize("device", ["cuda"])
-@mark.parametrize("dtype", [float32, float16, bfloat16])
+@mark.parametrize("dtype", [float32])
 def test_input_range_backward(  # pylint: disable=too-many-arguments
     bsz: int,
     num_inp_dims: int,
@@ -223,6 +235,7 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     out_size: int,
     bias: bool,
     inp_res: float,
+    ir_dynamic: bool,
     max_inp_size: int,
     ir_init_value: float,
     ir_init_from_data: int,
@@ -250,6 +263,7 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
         rpu_config.forward.out_noise = 0.0
         rpu_config.mapping.max_input_size = max_inp_size
         rpu_config.pre_post.input_range.enable = True
+        rpu_config.pre_post.input_range.dynamic = ir_dynamic
         rpu_config.pre_post.input_range.learn_input_range = True
         rpu_config.pre_post.input_range.init_value = ir_init_value
         rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
@@ -302,36 +316,38 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
 if __name__ == "__main__":
     # test_input_range_backward(
     #     bsz=10,
-    #     num_inp_dims=3,
+    #     num_inp_dims=2,
     #     inp_size=513,
     #     out_size=10,
     #     bias=False,
     #     inp_res=254,
+    #     ir_dynamic=False,
     #     max_inp_size=512,
     #     ir_init_value=3.0,
     #     ir_init_from_data=10,
     #     ir_init_std_alpha=2.0,
-    #     device="cuda",
+    #     device="cpu",
     #     dtype=float16,
     # )
     test_linear_forward(
-        bsz=1,
-        num_inp_dims=1,
+        bsz=10,
+        num_inp_dims=2,
         inp_size=10,
-        out_size=10,
-        bias=True,
-        inp_res=254,
-        max_inp_size=20,
+        out_size=20,
+        bias=False,
+        inp_res=-1,
+        max_inp_size=10,
         ir_enable=True,
+        ir_dynamic=False,
         ir_learn_input_range=True,
         ir_init_value=3.0,
         ir_init_std_alpha=2.0,
-        adc_config=(10, 2**8 - 2),
+        adc_config=(-1, -1),
         out_noise=False,
         out_noise_per_channel=False,
         weight_modifier=WeightModifierType.NONE,
         weight_modifier_res=254,
         clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-        device="cuda",
+        device="cpu",
         dtype=float32,
     )

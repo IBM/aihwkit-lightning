@@ -168,10 +168,10 @@ def matmul_kernel(
     inp_ptr,  # 2D [inp_size, hidden_size]
     weights_ptr,  # 2D [hidden_size, out_size]
     out_ptr,  # 2D [inp_size, out_size]
-    ir_vector_ptr,  # 1D [hidden_size]
+    ir_vector_ptr,  # 2D [inp_size, hidden_size]
     assumed_wmax_ptr,  # 2D [num_slices, out_size]
     reduced_assumed_wmax_ptr,  # 2D [num_slices, 1]
-    input_range_ptr,  # 1D [num_slices]
+    input_range_ptr,  # 2D [num_slices, inp_size]
     upper_end_of_slices_ptr,  # 1D [num_slices]
     # sizes
     inp_size,
@@ -187,6 +187,9 @@ def matmul_kernel(
     stride_out_out_size,
     stride_assumed_wmax_num_slices,
     stride_assumed_wmax_out_size,
+    stride_input_range_slice,
+    stride_ir_vector_inp,
+    stride_ir_vector_hidden,
     # miscellaneous
     out_noise_seed,
     inp_res: tl.constexpr,
@@ -286,7 +289,8 @@ def matmul_kernel(
         current_lower = ir_range_lower
 
         # load the correct input range
-        input_range = tl.load(input_range_ptr + slice_idx)
+        input_range_ptrs = input_range_ptr + slice_idx * stride_input_range_slice + offs_am[:, None]
+        input_range = tl.load(input_range_ptrs, mask=offs_am[:, None] < inp_size, other=1.0)
 
         offs_k = current_lower + tl.arange(0, BLOCK_SIZE_HIDDEN)
         a_ptrs = inp_ptr + (
@@ -318,7 +322,8 @@ def matmul_kernel(
 
             if not ir_vector_is_none:
                 # save the correct IR per dimension in the hidden
-                tl.store(ir_vector_ptr + offs_k, input_range, mask=offs_k < current_upper)
+                ir_vector_ptrs = ir_vector_ptr + offs_am[:, None] * stride_ir_vector_inp + stride_ir_vector_hidden * offs_k[None, :]
+                tl.store(ir_vector_ptrs, input_range, mask=(offs_am[:, None] < inp_size) & (offs_k[None, :] < current_upper))
 
             # clip between the input ranges
             over_ir_mask = inp_block > input_range
@@ -422,8 +427,8 @@ class TritonLinear(Function):
         ctx: FunctionCtx,
         inp: Tensor,
         weights: Tensor,
-        input_range: Tensor,
-        input_range_update_idx: Tensor,
+        input_range: Tensor | None,
+        input_range_update_idx: Tensor | None,
         upper_end_of_slices: Tensor,
         rpu_config: TorchInferenceRPUConfig,
         training: bool,
@@ -448,7 +453,8 @@ class TritonLinear(Function):
         Returns:
             Gradients w.r.t. inputs, weights and input ranges.
         """
-        assert input_range.is_contiguous(), "input_range not contiguous"
+        ir_dynamic = rpu_config.pre_post.input_range.dynamic
+        assert ir_dynamic or input_range.is_contiguous(), "input_range not contiguous"
         assert weights.is_contiguous(), "weights not contiguous"
         assert inp.is_contiguous(), "inp not contiguous"
 
@@ -462,12 +468,12 @@ class TritonLinear(Function):
         if inp.ndim == 1:
             inp = inp.view(1, -1)
         inp = inp.flatten(end_dim=-2)
-        num_slices = len(input_range)
+        num_slices = len(upper_end_of_slices)
 
         # update the input ranges if necessary
         if training:
             ir_params = rpu_config.pre_post.input_range
-            if input_range_update_idx[0] < ir_params.init_from_data:
+            if not ir_dynamic and input_range_update_idx[0] < ir_params.init_from_data:
                 # # Avoiding the for loop yields a speed-up.
                 stds = sliced_fast_std(inp, upper_end_of_slices)
                 # if (stds > 0.0).all():
@@ -560,9 +566,21 @@ class TritonLinear(Function):
         out_noise_per_channel = rpu_config.forward.out_noise_per_channel
         out_noise_seed = randint(2**31, (1,)).item()
 
-        # we fill this vector with the element wise IR
-        ir_vector = empty((1, hidden_size), device=inp.device, dtype=inp.dtype)
+        # create an input range vector that has shape [-1, hidden_size]
+        ir_vector = empty(
+            (inp.size(0), hidden_size),
+            device=inp.device,
+            dtype=inp.dtype
+        )
         ir_vector = ir_vector.contiguous()
+
+        # preprocess the input range here to have shape [num_slices, -1]
+        # i.e. for every token, we have num_slices many IRs
+        if ir_dynamic:
+            expanded_input_range = sliced_fast_abs_max(inp, upper_end_of_slices=upper_end_of_slices)
+        else:
+            expanded_input_range = input_range.unsqueeze(1).repeat(num_slices, inp.size(0))
+
 
         # for some tests, we skip rounding
         skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
@@ -574,10 +592,10 @@ class TritonLinear(Function):
             inp,  # 2D [inp_size, hidden_size]
             weights.T,  # 2D [hidden_size, out_size]
             out,  # 2D [inp_size, out_size]
-            ir_vector,  # 1D [hidden_size]
+            ir_vector,  # 2D [inp_size, hidden_size]
             assumed_wmax,  # 2D [num_slices, out_size]
             reduced_assumed_wmax,  # 2D [num_slices, 1]
-            input_range,  # 1D [num_slices]
+            expanded_input_range,  # 2D [num_slices, inp_size]
             upper_end_of_slices,  # 1D [num_slices]
             # sizes
             inp_size,
@@ -593,6 +611,9 @@ class TritonLinear(Function):
             out.stride(1),
             assumed_wmax.stride(0),
             assumed_wmax.stride(1),
+            expanded_input_range.stride(0),
+            ir_vector.stride(0),
+            ir_vector.stride(1),
             # for the other ptrs, we assume stride 1
             # miscellaneous
             out_noise_seed,
@@ -616,7 +637,7 @@ class TritonLinear(Function):
 
         # save some stuff for backwards
         ctx.rpu_config = rpu_config  # type: ignore[attr-defined]
-        ctx.save_for_backward(inp, weights, input_range, ir_vector)
+        ctx.save_for_backward(inp, weights, None if ir_dynamic else input_range, ir_vector)
 
         out = out.view(out_shape)
         return out
@@ -626,7 +647,7 @@ class TritonLinear(Function):
     # pylint: disable=too-many-locals
     def backward(
         ctx: FunctionCtx, grad_output: Tensor
-    ) -> Tuple[Tensor, Tensor, Tensor, None, None, None, None, None]:  # type: ignore
+    ) -> Tuple[Tensor, Tensor, Tensor | None, None, None, None, None, None]:  # type: ignore
         """Straight-through estimator for linear layer
 
         Args:
@@ -671,23 +692,26 @@ class TritonLinear(Function):
         grad_inp = grad_output @ weights
         grad_inp = grad_inp.view(grad_inp_shape)
 
-        # ir gradient
-        decay = rpu_config.pre_post.input_range.decay  # type: ignore[attr-defined]
-        # type: ignore[attr-defined]
-        input_min_percentage = rpu_config.pre_post.input_range.input_min_percentage
+        if rpu_config.pre_post.input_range.dynamic:
+            ir_grad = None
+        else:
+            # ir gradient
+            decay = rpu_config.pre_post.input_range.decay  # type: ignore[attr-defined]
+            # type: ignore[attr-defined]
+            input_min_percentage = rpu_config.pre_post.input_range.input_min_percentage
 
-        upper_thresh = (inp > ir_vector).view_as(grad_inp)
-        lower_thresh = (inp < -ir_vector).view_as(grad_inp)
-        ir_grad = zeros_like(input_range)
-        ir_grad += clamp(grad_inp[upper_thresh], min=None, max=0.0).sum()
-        ir_grad -= clamp(grad_inp[lower_thresh], min=0.0, max=None).sum()
-        ir_grad *= input_range
-        did_clamp_mask = upper_thresh | lower_thresh
-        if decay > 0:
-            # - We shrink the input range if less than X% of the inputs are clipping.
-            # where X is 1-ir_params.input_min_percentage
-            percentage = 1.0 - (did_clamp_mask).sum().div(upper_thresh.numel())
-            ir_grad += decay * input_range * (percentage > input_min_percentage)
+            upper_thresh = (inp > ir_vector).view_as(grad_inp)
+            lower_thresh = (inp < -ir_vector).view_as(grad_inp)
+            ir_grad = zeros_like(input_range)
+            ir_grad += clamp(grad_inp[upper_thresh], min=None, max=0.0).sum()
+            ir_grad -= clamp(grad_inp[lower_thresh], min=0.0, max=None).sum()
+            ir_grad *= input_range
+            did_clamp_mask = upper_thresh | lower_thresh
+            if decay > 0:
+                # - We shrink the input range if less than X% of the inputs are clipping.
+                # where X is 1-ir_params.input_min_percentage
+                percentage = 1.0 - (did_clamp_mask).sum().div(upper_thresh.numel())
+                ir_grad += decay * input_range * (percentage > input_min_percentage)
 
-        grad_inp[did_clamp_mask] = 0.0
+            grad_inp[did_clamp_mask] = 0.0
         return grad_inp, grad_w, ir_grad, None, None, None, None, None

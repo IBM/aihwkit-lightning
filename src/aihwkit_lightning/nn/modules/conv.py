@@ -43,9 +43,11 @@ def is_at_least_volta_gpu():
 TRITON_AVAIL = False
 try:
     from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
-
-    if not is_at_least_volta_gpu():
-        raise ImportError("GPU must at least be Volta")
+    
+    if not os.environ.get("TRITON_INTERPRET", None) == "1":
+        # we are not in interpret mode
+        if not is_at_least_volta_gpu():
+            raise ImportError("GPU must at least be Volta")
     TRITON_AVAIL = True
 except ImportError:
     print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
