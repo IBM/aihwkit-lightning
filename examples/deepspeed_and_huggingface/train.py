@@ -100,6 +100,12 @@ def main():
             desc="Running tokenizer on dataset",
         )
 
+        # normally you would put the sentences together and then split
+        # into chunks that have max-seq-len of the model.
+        # here, we skip this and just filter out sequences that have less
+        # than 500 characters.
+        dataset = dataset.filter(lambda examples: len(examples["text"]) >= 500)
+
         if not args.fp:
             # Convert the model into an anlog model
             rpu_config = create_rpu_config(args)
@@ -145,7 +151,6 @@ def main():
         save_steps=args.save_steps,
         save_total_limit=args.save_total_limit,
         seed=args.seed,
-        data_seed=args.seed,
         metric_for_best_model=metric_name,
         load_best_model_at_end=args.load_best_model_at_end,
         warmup_ratio=args.warmup_ratio,

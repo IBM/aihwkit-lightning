@@ -99,11 +99,10 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
             weight_decay=0.1,
             num_train_epochs=10,
             max_grad_norm=1.0,
-            eval_steps=500,
-            save_steps=500,
+            eval_steps=10,
+            save_steps=100,
             save_total_limit=1,
             seed=0,
-            data_seed=0,
             metric_for_best_model=metric_name,
             warmup_ratio=0.06,
             bf16=False,
@@ -152,4 +151,4 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
 
 
 if __name__ == "__main__":
-    training_huggingface(use_normal_torch=True, use_fp16=False)
+    training_huggingface(use_normal_torch=False, use_fp16=False)
