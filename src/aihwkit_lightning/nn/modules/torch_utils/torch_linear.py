@@ -14,7 +14,7 @@
 import os
 from typing import List, Tuple, Union
 from math import sqrt
-from torch import Tensor, randn_like, clamp, zeros_like, finfo
+from torch import Tensor, randn_like, clamp, zeros_like, stack, finfo
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
 from aihwkit_lightning.simulator.configs import (
@@ -211,14 +211,14 @@ class TorchLinear:
             inp_slice = inp[..., current_upper : current_upper + inp_size]  # noqa: E203
 
             if rpu_config.pre_post.input_range.enable:
-                assert input_range is not None, "Input range must be provided"
-                assert (
-                    input_range_update_idx is not None
-                ), "Input range update index must be provided"
-
+                is_dynamic = rpu_config.pre_post.input_range.dynamic
                 if rpu_config.pre_post.input_range.fast_mode:
                     assert x_min is not None, "x_min must be provided"
                     assert x_max is not None, "x_max must be provided"
+                    assert input_range is not None, "Input range must be provided"
+                    assert (
+                        input_range_update_idx is not None
+                    ), "Input range update index must be provided"
                     inp_slice = TorchLinear.apply_input_range_fast(
                         values=inp_slice,
                         slice_idx=slice_idx,
@@ -229,7 +229,14 @@ class TorchLinear:
                         x_max=x_max,
                         update_from_data=training,
                     )
+                elif is_dynamic:
+                    input_range = inp_slice.abs().max(dim=-1, keepdim=True)[0]
+                    input_range = stack([input_range for _ in range(len(in_sizes))])
                 else:
+                    assert input_range is not None, "Input range must be provided"
+                    assert (
+                        input_range_update_idx is not None
+                    ), "Input range update index must be provided"
                     inp_slice, upper_thresh, lower_thresh = TorchLinear.apply_input_range(
                         values=inp_slice,
                         slice_idx=slice_idx,

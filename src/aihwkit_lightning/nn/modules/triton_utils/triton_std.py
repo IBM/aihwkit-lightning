@@ -218,6 +218,8 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
         num_slices,
         inp.stride(0),
         inp.stride(1),
+        # 32,
+        # 32,
     )
     per_slice_mean = per_slice_sum / num_inputs_per_slice
 
@@ -232,6 +234,8 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
         num_slices,
         inp.stride(0),
         inp.stride(1),
+        # 32,
+        # 32
     )
     per_slice_std = sqrt(per_slice_centered_and_squared / (num_inputs_per_slice - 1))
     per_slice_std = per_slice_std.to(dtype=inp.dtype)

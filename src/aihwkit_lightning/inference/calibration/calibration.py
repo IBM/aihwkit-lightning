@@ -230,12 +230,13 @@ def calibrate_input_ranges(
         ]:
             # we actually first change the rpu_config to enable the input range
             layer.rpu_config.pre_post.input_range.enable = True
+            layer.rpu_config.pre_post.input_range.dynamic = False
             layer.rpu_config.pre_post.input_range.learn_input_range = True
             layer.rpu_config.pre_post.input_range.init_value = 3.0
             if std_alpha is not None:
                 layer.rpu_config.pre_post.input_range.init_std_alpha = std_alpha
 
-            layer.input_range = Parameter(
+            layer.input_range = Parameter(  # type: ignore[assignment]
                 data=full(
                     (len(layer.in_sizes),),
                     fill_value=rpu_config.pre_post.input_range.init_value,
@@ -244,7 +245,7 @@ def calibrate_input_ranges(
                 ),
                 requires_grad=rpu_config.pre_post.input_range.learn_input_range,
             )
-            layer.input_range_update_idx = Parameter(
+            layer.input_range_update_idx = Parameter(  # type: ignore[assignment]
                 data=zeros((len(layer.in_sizes),), dtype=int32, device=layer.weight.device),
                 requires_grad=False,
             )
@@ -280,7 +281,7 @@ def calibrate_input_ranges(
     for layer_name, layer in model.named_analog_layers():
         layer: Union[AnalogLinear, AnalogConv2d]  # type: ignore[no-redef]
 
-        layer.input_range_update_idx = Parameter(
+        layer.input_range_update_idx = Parameter(  # type: ignore[assignment]
             data=full((len(layer.in_sizes),), fill_value=float("-Inf"), device=layer.weight.device),
             requires_grad=False,
         )

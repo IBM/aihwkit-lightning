@@ -139,6 +139,10 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
     aihwkit_rpu_config.mapping.weight_scaling_omega = 1.0
 
     # Forward - Input quantization
+    ir_dynamic = rpu_config.pre_post.input_range.dynamic
+    if ir_dynamic:
+        aihwkit_rpu_config.forward.noise_management = AIHWKITNoiseManagementType.ABS_MAX
+
     aihwkit_rpu_config.forward.inp_res = rpu_config.forward.inp_res
     if rpu_config.forward.inp_res > 0:
         assert (
@@ -158,7 +162,11 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
         assert rpu_config.forward.out_bound > 0, "Output bound must be set for output resolution"
 
     # Input range learning
-    aihwkit_rpu_config.pre_post.input_range.enable = rpu_config.pre_post.input_range.enable
+    if ir_dynamic:
+        # disable AIHWKIT input range because it overwrites ABS_MAX noise management
+        aihwkit_rpu_config.pre_post.input_range.enable = False
+    else:
+        aihwkit_rpu_config.pre_post.input_range.enable = rpu_config.pre_post.input_range.enable
     aihwkit_rpu_config.pre_post.input_range.decay = rpu_config.pre_post.input_range.decay
     aihwkit_rpu_config.pre_post.input_range.init_from_data = (
         rpu_config.pre_post.input_range.init_from_data
@@ -179,7 +187,7 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
 
     # Extract input ranges if any
     input_ranges = {}  # string: Tensor (1D or num_tiles)
-    if rpu_config.pre_post.input_range.enable:
+    if rpu_config.pre_post.input_range.enable and not ir_dynamic:
         for name, analog_layer in model.named_analog_layers():
             input_ranges[name] = analog_layer.input_range
 
@@ -210,8 +218,9 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
         tile_id_along_input_dim = int(module_match.group(1))
         module_name = analog_name_match.group(1)
 
-        input_range = input_ranges[module_name][tile_id_along_input_dim]
-        analog_tile.input_range.data = input_range.clone().view_as(analog_tile.input_range)
+        if rpu_config.pre_post.input_range.enable and not ir_dynamic:
+            input_range = input_ranges[module_name][tile_id_along_input_dim]
+            analog_tile.input_range.data = input_range.clone().view_as(analog_tile.input_range)
 
     # Set back to training if needed
     aihwkit_model = aihwkit_model.train() if training else aihwkit_model.eval()

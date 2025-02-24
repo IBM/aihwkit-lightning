@@ -48,6 +48,11 @@ class InputRangeParameter(_PrintableMixin):
         so that no error is raised if they are not set to `NONE`.
     """
 
+    dynamic: bool = False
+    """Dynamically compute the abs-max per input vector and use this
+    as the input range.
+    """
+
     learn_input_range: bool = True
     """Whether to learn the input range when enabled.
 

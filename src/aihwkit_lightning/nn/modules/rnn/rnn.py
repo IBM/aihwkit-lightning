@@ -403,17 +403,17 @@ class AnalogRNN(AnalogContainerBase, Module):
         """
         r_string = "" if not reverse else "_reverse"
         getattr(digital_layer, f"weight_hh_l{layer}{r_string}").set_(
-            analog_cell.weight_hh.weight.data.detach().clone()
+            analog_cell.weight_hh.weight.data.detach().clone()  # type: ignore[operator]
         )
         getattr(digital_layer, f"weight_ih_l{layer}{r_string}").set_(
-            analog_cell.weight_ih.weight.data.detach().clone()
+            analog_cell.weight_ih.weight.data.detach().clone()  # type: ignore[operator]
         )
         if analog_cell.weight_hh.bias is not None:
             getattr(digital_layer, f"bias_hh_l{layer}{r_string}").set_(
-                analog_cell.weight_hh.bias.data.detach().clone()
+                analog_cell.weight_hh.bias.data.detach().clone()  # type: ignore[operator]
             )
             getattr(digital_layer, f"bias_ih_l{layer}{r_string}").set_(
-                analog_cell.weight_ih.bias.data.detach().clone()
+                analog_cell.weight_ih.bias.data.detach().clone()  # type: ignore[operator]
             )
 
     @classmethod
@@ -431,7 +431,7 @@ class AnalogRNN(AnalogContainerBase, Module):
         analog_cell = (
             module.rnn.layers[0].cell
             if not module.bidirectional
-            else module.rnn.layers[0].directions[0].cell
+            else module.rnn.layers[0].directions[0].cell  # type: ignore[index,union-attr]
         )
         device = analog_cell.weight_ih.weight.device
         dtype = analog_cell.weight_ih.weight.dtype
@@ -480,11 +480,19 @@ class AnalogRNN(AnalogContainerBase, Module):
                 layer_cell = (
                     module.rnn.layers[layer].cell
                     if not module.bidirectional
-                    else module.rnn.layers[layer].directions[0].cell
+                    else (
+                        module.rnn.layers[layer]
+                        .directions[0]  # type: ignore[index,union-attr]
+                        .cell
+                    )
                 )
                 module.update_digital_attrs(digital_cell, layer_cell, layer, False)
                 if module.bidirectional:
-                    layer_cell = module.rnn.layers[layer].directions[1].cell
+                    layer_cell = (
+                        module.rnn.layers[layer]
+                        .directions[1]  # type: ignore[index,union-attr]
+                        .cell
+                    )
                     module.update_digital_attrs(digital_cell, layer_cell, layer, True)
 
         return digital_cell.to(device=device, dtype=dtype)
