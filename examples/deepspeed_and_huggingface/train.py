@@ -46,7 +46,7 @@ IS_CUDA = torch.cuda.is_available()
 
 
 def main():
-    # pylint: disable=missing-function-docstring, too-many-locals
+    # pylint: disable=missing-function-docstring, too-many-locals, too-many-statements
 
     log_level = datasets.logging.INFO
     datasets.utils.logging.set_verbosity(log_level)
