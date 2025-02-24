@@ -432,7 +432,7 @@ class TritonLinear(Function):
 
     @staticmethod
     # type: ignore[override]
-    def forward(  # pylint: disable=too-many-locals, too-many-statements
+    def forward(  # pylint: disable=too-many-locals, too-many-statements, too-many-branches
         ctx: FunctionCtx,
         inp: Tensor,
         weights: Tensor,
