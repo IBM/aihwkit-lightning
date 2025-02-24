@@ -137,8 +137,8 @@ class AnalogBidirRNNLayer(Module):
            Zeroed state tensor
         """
         return (
-            self.directions[0].get_zero_state(batch_size),
-            self.directions[1].get_zero_state(batch_size),
+            self.directions[0].get_zero_state(batch_size),  # type: ignore[operator]
+            self.directions[1].get_zero_state(batch_size),  # type: ignore[operator]
         )
 
     def forward(

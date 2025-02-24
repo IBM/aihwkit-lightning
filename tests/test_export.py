@@ -54,6 +54,12 @@ def fixture_ir_learn_input_range(request) -> bool:
     return request.param
 
 
+@fixture(scope="module", name="ir_dynamic")
+def fixture_ir_dynamic(request) -> bool:
+    """Dynamic input range"""
+    return request.param
+
+
 @fixture(scope="module", name="ir_init_value")
 def fixture_ir_init_value(request) -> float:
     """IR initialization value parameter"""
@@ -101,6 +107,7 @@ bsz_num_inp_dims_parameters = [
 def fixture_rpu(
     max_inp_size: int,
     ir_enable_inp_res: Tuple[bool, float],
+    ir_dynamic: bool,
     ir_learn_input_range: bool,
     ir_init_value: float,
     ir_init_from_data: int,
@@ -129,6 +136,7 @@ def fixture_rpu(
     rpu_config.mapping.max_input_size = max_inp_size
 
     rpu_config.pre_post.input_range.enable = ir_enable
+    rpu_config.pre_post.input_range.dynamic = ir_dynamic
     rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
     rpu_config.pre_post.input_range.init_value = ir_init_value
     rpu_config.pre_post.input_range.init_from_data = ir_init_from_data
@@ -143,6 +151,7 @@ def fixture_rpu(
     "ir_enable_inp_res", [(True, 2**8 - 2), (True, 1 / (2**8 - 2))], ids=str, indirect=True
 )
 @mark.parametrize("ir_learn_input_range", [True, False], indirect=True)
+@mark.parametrize("ir_dynamic", [True, False], indirect=True)
 @mark.parametrize("ir_init_value", [2.0, 3.0], indirect=True)
 @mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0], indirect=True)
@@ -213,7 +222,8 @@ def test_linear_forward(
     # Make the input range a bit harder
     analog_layer: AnalogLinear
     for analog_layer in model.analog_layers():
-        if rpu.pre_post.input_range.enable:
+        is_dynamic = rpu.pre_post.input_range.dynamic
+        if rpu.pre_post.input_range.enable and not is_dynamic:
             input_range_tensor = analog_layer.input_range
             analog_layer.input_range.data = 0.1 + arange(input_range_tensor.numel()).float()
 
@@ -237,6 +247,7 @@ if __name__ == "__main__":
         max_inp_size=5,
         ir_enable_inp_res=(True, 254),
         ir_learn_input_range=True,
+        ir_dynamic=True,
         ir_init_value=3.0,
         ir_init_from_data=10,
         ir_init_std_alpha=3.0,
@@ -246,5 +257,5 @@ if __name__ == "__main__":
     )
 
     test_linear_forward(
-        bsz=3, num_inp_dims=2, inp_size=10, device="cuda", dtype=float32, rpu=test_rpu
+        bsz=3, num_inp_dims=2, inp_size=10, device="cpu", dtype=float32, rpu=test_rpu
     )

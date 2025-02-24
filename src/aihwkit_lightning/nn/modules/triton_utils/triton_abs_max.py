@@ -253,7 +253,14 @@ def fast_abs_max(weights: Tensor):
         )
 
     fast_abs_max_kernel[grid](
-        weights, per_channel_amax, weights.stride(0), weights.stride(1), n_cols, n_rows
+        weights,
+        per_channel_amax,
+        weights.stride(0),
+        weights.stride(1),
+        n_cols,
+        n_rows,
+        # 32,
+        # 32
     )
 
     per_channel_amax = per_channel_amax.to(weights.dtype)
@@ -307,6 +314,8 @@ def sliced_fast_abs_max(weights: Tensor, upper_end_of_slices: Tensor):
         n_splits,
         n_cols,
         n_rows,
+        # 32,
+        # 32,
     )
 
     per_channel_amax = per_channel_amax.to(weights.dtype)

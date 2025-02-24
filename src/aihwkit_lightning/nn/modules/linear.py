@@ -14,8 +14,8 @@
 from typing import Optional, Tuple, List
 import os
 from logging import warning
-from torch import Tensor, cuda, empty, zeros, tensor, int32
-from torch.nn import Linear, Parameter
+from torch import Tensor, cuda, tensor, int32
+from torch.nn import Linear
 from aihwkit_lightning.simulator.configs import (
     TorchInferenceRPUConfig,
     WeightClipType,
@@ -38,8 +38,10 @@ TRITON_AVAIL = False
 try:
     from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
 
-    if not is_at_least_volta_gpu():
-        raise ImportError("GPU must at least be Volta")
+    if not os.environ.get("TRITON_INTERPRET", None) == "1":
+        # we are not in interpret mode
+        if not is_at_least_volta_gpu():
+            raise ImportError("GPU must at least be Volta")
     TRITON_AVAIL = True
 except ImportError:
     print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
@@ -62,6 +64,10 @@ class AnalogLinear(Linear, AnalogLayerBase):
         Linear.__init__(self, in_features, out_features, bias, device, dtype)
         self.rpu_config = rpu_config
 
+        if str(device) == "meta":
+            # init these small values on cpu
+            device = "cpu"
+
         max_input_size = rpu_config.mapping.max_input_size
         self.in_sizes = self.get_split_sizes(in_features, max_input_size)
         self.upper_end_of_slices = (
@@ -70,34 +76,12 @@ class AnalogLinear(Linear, AnalogLayerBase):
             .contiguous()
         )
 
-        if rpu_config.pre_post.input_range.enable:
-            # for every vertical tile, we have an input range
-            self.input_range = Parameter(
-                data=empty((len(self.in_sizes),), dtype=dtype, device=device).fill_(
-                    rpu_config.pre_post.input_range.init_value
-                ),
-                requires_grad=rpu_config.pre_post.input_range.learn_input_range,
-            )
-            self.register_buffer(
-                "input_range_update_idx",
-                tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device),
-            )
-            # needed for the fast mode
-            self.register_buffer(
-                "x_min", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
-            )
-            self.register_buffer(
-                "x_max", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
-            )
-            self.x_min: Tensor
-            self.x_min -= 1e-5
-            self.x_max: Tensor
-            self.x_max += 1e-5
-        else:
-            self.input_range = None  # type: ignore
-            self.input_range_update_idx = None
-            self.x_min = None  # type: ignore
-            self.x_max = None  # type: ignore
+        self.init_ir(
+            init_value_ir=self.rpu_config.pre_post.input_range.init_value,
+            init_value_counter=0,
+            device=device,
+            dtype=dtype,
+        )
 
     def forward(self, inp: Tensor) -> Tensor:  # pylint: disable=arguments-renamed
         """Forward function."""
@@ -134,6 +118,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
             )
             return out + self.bias if self.bias is not None else out
 
+        # pylint: disable=attribute-defined-outside-init
         self.input_range_update_idx: Tensor  # type: ignore
         out = TorchLinear.linear(
             inp,

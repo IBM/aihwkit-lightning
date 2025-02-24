@@ -11,7 +11,12 @@
 # that they have been altered from the originals.
 
 """Base class for adding functionality to analog layers."""
-from typing import Tuple, Generator, Callable
+from typing import Tuple, Generator, Callable, List, Any
+from torch import dtype as torch_dtype
+from torch import device as torch_device
+from torch.nn import Parameter
+from torch import Tensor, empty, zeros
+from ...simulator.configs import TorchInferenceRPUConfig
 
 
 class AnalogLayerBase:
@@ -20,6 +25,10 @@ class AnalogLayerBase:
     In general, the defined methods will be looped for all analog tile
     modules and delegate the function.
     """
+
+    rpu_config: TorchInferenceRPUConfig
+    in_sizes: List[int]
+    register_buffer: Any
 
     IS_CONTAINER: bool = False
     """Class constant indicating whether sub-layers exist or whether
@@ -84,3 +93,44 @@ class AnalogLayerBase:
     def clip_weights(self) -> None:
         """Clip the weights of the analog layers."""
         return
+
+    def init_ir(
+        self,
+        device: torch_device,
+        dtype: torch_dtype,
+        init_value_ir: float,
+        init_value_counter: int = 0,
+    ):
+        """Initialize input range parameters."""
+
+        # pylint: disable=attribute-defined-outside-init
+
+        ir_config = self.rpu_config.pre_post.input_range
+        if ir_config.enable and not ir_config.dynamic:
+            # for every vertical tile, we have an input range
+            self.input_range = Parameter(
+                data=empty((len(self.in_sizes),), dtype=dtype, device=device).fill_(init_value_ir),
+                requires_grad=self.rpu_config.pre_post.input_range.learn_input_range,
+            )
+            self.register_buffer(  # type: ignore[call-arg]
+                "input_range_update_idx",
+                tensor=empty((len(self.in_sizes),), dtype=dtype, device=device).fill_(
+                    init_value_counter
+                ),
+            )
+            # needed for the fast mode
+            self.register_buffer(  # type: ignore[call-arg]
+                "x_min", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
+            )
+            self.register_buffer(  # type: ignore[call-arg]
+                "x_max", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
+            )
+            self.x_min: Tensor
+            self.x_min -= 1e-5
+            self.x_max: Tensor
+            self.x_max += 1e-5
+        else:
+            self.input_range = None  # type: ignore
+            self.input_range_update_idx = None
+            self.x_min = None  # type: ignore
+            self.x_max = None  # type: ignore
