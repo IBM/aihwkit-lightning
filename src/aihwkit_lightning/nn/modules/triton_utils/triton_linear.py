@@ -203,6 +203,7 @@ def matmul_kernel(
     out_noise_per_channel: tl.constexpr,
     ir_vector_is_none: tl.constexpr,
     dtype: tl.constexpr,
+    precision: tl.constexpr,
     # block sizes
     BLOCK_SIZE_INP: tl.constexpr,  # pylint: disable=invalid-name
     BLOCK_SIZE_HIDDEN: tl.constexpr,  # pylint: disable=invalid-name
@@ -352,7 +353,7 @@ def matmul_kernel(
             inp_block = inp_block.to(dtype)
 
             # do the MVM
-            dot_prod = tl.dot(inp_block, weight_block)
+            dot_prod = tl.dot(inp_block, weight_block, input_precision=precision)
 
             # scale back with the input range
             dot_prod = input_range.to(tl.float32) * dot_prod
@@ -596,6 +597,11 @@ class TritonLinear(Function):
 
         dtype = tl.float32 if inp.dtype == float32 else tl.float16
 
+        # disable tf32 when testing is on
+        precision = None
+        if os.environ.get("AIHWKIT_TESTING", None) == "1":
+            precision = "ieee"
+
         matmul_kernel[grid](
             inp,  # 2D [inp_size, hidden_size]
             weights.T,  # 2D [hidden_size, out_size]
@@ -636,6 +642,7 @@ class TritonLinear(Function):
             out_noise_per_channel,
             False,  # ir_vector is None
             dtype,
+            precision,
             # block sizes
             # 64,  # This is for debugging
             # 32,
