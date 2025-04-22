@@ -87,7 +87,7 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
             overwrite_output_dir=True,
             do_train=True,
             do_eval=True,
-            evaluation_strategy="steps",
+            eval_strategy="steps",
             save_strategy="steps",
             per_device_train_batch_size=16,
             per_device_eval_batch_size=32,
