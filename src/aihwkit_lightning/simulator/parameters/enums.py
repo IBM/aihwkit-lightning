@@ -55,3 +55,12 @@ class WeightClipType(Enum):
     LAYER_GAUSSIAN_PER_CHANNEL = "LayerGaussianPerChannel"
     """Calculates the second moment of the whole weight matrix per output column and clips
     at ``sigma`` times the result symmetrically around zero."""
+
+    LEARNABLE = "Learnable"
+    """Implements ParetoQ-like learnable weight clipping (originally LSQ)
+    see eq. 3 from https://arxiv.org/pdf/1902.08153."""
+
+    LEARNABLE_PER_CHANNEL = "LearnablePerChannel"
+    """Implements ParetoQ-like learnable weight clipping (originally LSQ)
+    see eq. 3 from https://arxiv.org/pdf/1902.08153. Implements this on a
+    per-channel basis."""

@@ -21,14 +21,15 @@
 import math
 from typing import Tuple
 
-from torch import tensor, where, sum, randn, float16, float32
+from torch import tensor, zeros, where, sum, randn, float16, float32
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch.autograd import Function
-from torch.nn import Linear
+from torch.nn import Linear, Parameter
+import torch.nn.functional as F
 
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
-from aihwkit_lightning.simulator.configs import WeightClipType
+from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
 
 
 class LsqBinaryTernaryExtension(Function):
@@ -55,9 +56,9 @@ class LsqBinaryTernaryExtension(Function):
         Qn = -(2 ** (num_bits - 1) - 1)
         Qp = 2 ** (num_bits - 1) - 1
 
-        eps = torch.tensor(0.00001, device=alpha.device).float()
+        eps = tensor(0.00001, device=alpha.device).float()
 
-        alpha = torch.where(alpha > eps, alpha, eps)
+        alpha = where(alpha > eps, alpha, eps)
 
         grad_scale = (
             1.0 / math.sqrt(input.numel())
@@ -90,7 +91,7 @@ class LsqBinaryTernaryExtension(Function):
                 )
             else:
                 grad_alpha = (input_.sign()) * grad_output * grad_scale
-                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+                grad_alpha = sum(grad_alpha, dim=-1, keepdim=True)
         else:
             if layerwise:
                 grad_alpha = (
@@ -116,7 +117,7 @@ class LsqBinaryTernaryExtension(Function):
                     * grad_output
                     * grad_scale
                 )
-                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+                grad_alpha = sum(grad_alpha, dim=-1, keepdim=True)
 
         grad_input = indicate_middle * grad_output
         return grad_input, grad_alpha, None, None
@@ -125,18 +126,25 @@ class LsqBinaryTernaryExtension(Function):
 class ParetoQQuantizeLinear(Linear):
     def __init__(
         self,
-        *kargs,
         symmetric=True,
         bias=False,
         w_bits=16,
         weight_layerwise=False,
+        *args,
+        **kwargs,
     ):
-        super(QuantizeLinear, self).__init__(*kargs, bias=False)
+        super().__init__(*args, **kwargs, bias=False)
         self.w_bits = w_bits
         self.weight_layerwise = weight_layerwise
         # params for weight quant
         if self.w_bits < 16:
-            self.weight_clip_val = nn.Parameter(tensor(self.weight.shape[0], 1))
+            self.weight_clip_val = Parameter(
+                zeros(
+                    self.weight.size(0),1,
+                    device=self.weight.device,
+                    dtype=self.weight.dtype
+                )
+            )
 
     def forward(self, input_):
         # quantize weight
@@ -155,7 +163,7 @@ class ParetoQQuantizeLinear(Linear):
         else:
             raise NotImplementedError
 
-        out = nn.functional.linear(input_, weight)
+        out = F.linear(input_, weight)
         if self.bias is not None:
             out += self.bias.view(1, -1).expand_as(out)
 
@@ -169,6 +177,7 @@ def test_pareto_q_correctness(
     num_inp_dims: int,
     device: torch_device,
     dtype: torch_dtype,
+    rpu_config: TorchInferenceRPUConfig,
     bias: bool = False,
     symmetric: bool = True,
     w_bits: int = 4,
@@ -190,20 +199,33 @@ def test_pareto_q_correctness(
     else:
         inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype)
 
+    orig_out = orig_linear(inp)
+    orig_loss = orig_out.sum()
+    orig_loss.backward()
+
 
 def fixture_rpus(
-    modifier_res: int
+    modifier_res: int,
+    per_channel: bool
 ) -> TorchInferenceRPUConfig:
     """Fixture for initializing rpus globally for all tests that need them"""
     rpu_config = TorchInferenceRPUConfig()
     rpu_config.modifier.res = modifier_res
-    rpu_config.clip.type = WeightClipType.ParetoQ
+    rpu_config.modifier.type = (
+        WeightModifierType.DISCRETIZE_PER_CHANNEL if per_channel
+        else WeightModifierType.DISCRETIZE
+    )
+    rpu_config.clip.type = (
+        WeightClipType.LEARNABLE_PER_CHANNEL if per_channel
+        else WeightClipType.LEARNABLE
+    )
     return rpu_config
 
 
 if __name__ == "__main__":
     rpu_config = fixture_rpus(
-        modifier_res=2**4 - 2  # 4 bits
+        modifier_res=2**4 - 2,  # 4 bits
+        per_channel=True
     )
     test_pareto_q_correctness(
         inp_size=10,
@@ -211,5 +233,6 @@ if __name__ == "__main__":
         bsz=1,
         num_inp_dims=1,
         device=torch_device("cpu"),
-        dtype=float16
+        dtype=float16,
+        rpu_config=rpu_config
     )
