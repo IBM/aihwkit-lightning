@@ -19,7 +19,7 @@ import yaml
 import torch
 from transformers import Trainer
 from aihwkit_lightning.simulator.configs.configs import TorchInferenceRPUConfig
-from aihwkit_lightning.simulator.parameters.enums import WeightModifierType, WeightClipType
+from aihwkit_lightning.simulator.parameters.enums import WeightNoiseInjectionType, WeightClipType
 from aihwkit_lightning.exceptions import ArgumentError
 
 
@@ -95,14 +95,14 @@ def create_rpu_config(args):
     rpu_config.modifier.res = args.modifier_res
     rpu_config.modifier.enable_during_test = args.modifier_enable_during_test
     if args.modifier_type == "add_gauss":
-        modifier_type = WeightModifierType.ADD_NORMAL
+        modifier_type = WeightNoiseInjectionType.ADD_NORMAL
     elif args.modifier_type == "add_gauss_channel":
-        modifier_type = WeightModifierType.ADD_NORMAL_PER_CHANNEL
+        modifier_type = WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL
     elif args.modifier_type == "none":
-        modifier_type = WeightModifierType.NONE
+        modifier_type = WeightNoiseInjectionType.NONE
     else:
         raise ArgumentError("Unknown modifier type")
-    rpu_config.modifier.type = modifier_type
+    rpu_config.modifier.noise_type = modifier_type
 
     rpu_config.mapping.max_input_size = args.mapping_max_input_size
 
@@ -110,7 +110,6 @@ def create_rpu_config(args):
     rpu_config.pre_post.input_range.learn_input_range = args.input_range_learn_input_range
     rpu_config.pre_post.input_range.init_value = args.input_range_init_value
     rpu_config.pre_post.input_range.fast_mode = args.input_range_fast_mode
-    rpu_config.pre_post.input_range.init_with_max = args.input_range_init_with_max
     rpu_config.pre_post.input_range.init_from_data = args.input_range_init_from_data
     rpu_config.pre_post.input_range.init_std_alpha = args.input_range_init_std_alpha
     rpu_config.pre_post.input_range.decay = args.input_range_decay

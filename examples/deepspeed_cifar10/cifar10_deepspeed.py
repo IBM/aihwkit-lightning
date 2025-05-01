@@ -31,7 +31,7 @@ from aihwkit_lightning.nn.conversion import convert_to_analog
 from aihwkit_lightning.simulator.configs import (
     TorchInferenceRPUConfig,
     WeightClipType,
-    WeightModifierType,
+    WeightNoiseInjectionType,
 )
 
 logger.setLevel("WARNING")
@@ -251,7 +251,7 @@ def main(args):
     rpu_config.clip.type = WeightClipType.LAYER_GAUSSIAN
     rpu_config.clip.sigma = 2.5
     rpu_config.forward.inp_res = 254
-    rpu_config.modifier.type = WeightModifierType.ADD_NORMAL
+    rpu_config.modifier.noise_type = WeightNoiseInjectionType.ADD_NORMAL
     rpu_config.modifier.std_dev = 0.023
 
     net = convert_to_analog(net, rpu_config=rpu_config)

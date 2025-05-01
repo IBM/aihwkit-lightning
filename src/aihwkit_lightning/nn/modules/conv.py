@@ -24,11 +24,7 @@ from torch.nn.modules.utils import _single, _pair
 
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
-from aihwkit_lightning.simulator.configs import (
-    TorchInferenceRPUConfig,
-    WeightClipType,
-    WeightModifierType,
-)
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
 from aihwkit_lightning.nn.modules.torch_utils.torch_abs_max import sliced_abs_max
 
 
@@ -200,11 +196,6 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         """Compute the forward pass."""
 
         modified_weights = self.weight
-        apply_weight_modifier = (
-            self.training or self.rpu_config.modifier.enable_during_test
-        ) and self.rpu_config.modifier.type != WeightModifierType.NONE
-        if apply_weight_modifier:
-            modified_weights = self.weight.clone()
 
         apply_out_quantization = self.rpu_config.forward.out_res > 0
         if apply_out_quantization:
@@ -247,7 +238,6 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 self.upper_end_of_slices,
                 self.rpu_config,
                 self.training,
-                apply_weight_modifier,
             )
             out = out + self.bias if self.bias is not None else out
         else:
@@ -263,7 +253,6 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 in_sizes=self.in_sizes,
                 training=self.training,
                 rpu_config=self.rpu_config,
-                apply_weight_modifier=apply_weight_modifier,
                 apply_out_quantization=apply_out_quantization,
             )
 

@@ -40,7 +40,7 @@ from aihwkit.simulator.configs import (
 from aihwkit_lightning.nn.conversion import convert_to_digital
 from aihwkit_lightning.nn import AnalogLayerBase
 from aihwkit_lightning.nn.modules.container import AnalogWrapper
-from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
+from aihwkit_lightning.simulator.configs import WeightClipType, WeightNoiseInjectionType
 
 
 def base_aihwkit_rpu_config() -> AIHWKITRPUConfig:
@@ -108,17 +108,17 @@ def export_to_aihwkit(model: AnalogWrapper, max_output_size: int = -1) -> AIHWKI
     aihwkit_rpu_config.clip.sigma = rpu_config.clip.sigma
 
     # Weight modifier
-    modifier_name = rpu_config.modifier.type.name
-    modifier_value = rpu_config.modifier.type.value
+    modifier_name = rpu_config.modifier.noise_type.name
+    modifier_value = rpu_config.modifier.noise_type.value
     if modifier_value in modifier_name_conversion:
         remap_per_channel = True
         modifier_name = modifier_name_conversion[modifier_value]
     aihwkit_rpu_config.modifier.type = AIHWKITWeightModifierType[modifier_name]
-    if not rpu_config.modifier.type == WeightModifierType.NONE:
+    if not rpu_config.modifier.noise_type == WeightNoiseInjectionType.NONE:
         warnings.warn(f"The weight modifier is active and set to {modifier_name}")
     aihwkit_rpu_config.modifier.std_dev = rpu_config.modifier.std_dev
     aihwkit_rpu_config.modifier.res = rpu_config.modifier.res
-    aihwkit_rpu_config.modifier.enable_during_test = rpu_config.modifier.enable_during_test
+    aihwkit_rpu_config.modifier.enable_during_test = False
     aihwkit_rpu_config.modifier.assumed_wmax = 1.0
 
     # Output noise

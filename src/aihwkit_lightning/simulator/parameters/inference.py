@@ -18,7 +18,11 @@
 from dataclasses import dataclass, field
 
 from aihwkit_lightning.simulator.parameters.helpers import _PrintableMixin
-from aihwkit_lightning.simulator.parameters.enums import WeightModifierType, WeightClipType
+from aihwkit_lightning.simulator.parameters.enums import (
+    WeightNoiseInjectionType,
+    WeightQuantizationType,
+    WeightClipType,
+)
 
 
 @dataclass
@@ -47,18 +51,15 @@ class WeightModifierParameter(_PrintableMixin):
     ``DiscretizeAddNormal``.
     """
 
-    enable_during_test: bool = False
-    """Whether to use the last modified weight matrix during testing.
-
-    Caution:
-        This will **not** remove drop connect or any other noise
-        during evaluation, and thus should only used with care.
-    """
-
-    type: WeightModifierType = field(
-        default_factory=lambda: WeightModifierType.NONE, metadata={"always_show": True}
+    noise_type: WeightNoiseInjectionType = field(
+        default_factory=lambda: WeightNoiseInjectionType.NONE, metadata={"always_show": True}
     )
     """Type of the weight modification."""
+
+    quantization_type: WeightQuantizationType = field(
+        default_factory=lambda: WeightQuantizationType.NONE, metadata={"always_show": True}
+    )
+    """Type of the weight quantizer."""
 
 
 @dataclass

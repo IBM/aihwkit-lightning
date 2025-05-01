@@ -16,11 +16,7 @@ import os
 from logging import warning
 from torch import Tensor, cuda, tensor, int32
 from torch.nn import Linear
-from aihwkit_lightning.simulator.configs import (
-    TorchInferenceRPUConfig,
-    WeightClipType,
-    WeightModifierType,
-)
+from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
 from aihwkit_lightning.nn.modules.torch_utils.torch_abs_max import sliced_abs_max
@@ -98,12 +94,6 @@ class AnalogLinear(Linear, AnalogLayerBase):
         # pylint: disable=too-many-branches, too-many-statements, too-many-locals
 
         modified_weights = self.weight
-        apply_weight_modifier = (
-            self.training or self.rpu_config.modifier.enable_during_test
-        ) and self.rpu_config.modifier.type != WeightModifierType.NONE
-        if apply_weight_modifier:
-            modified_weights = self.weight.clone()
-
         apply_out_quantization = self.rpu_config.forward.out_res > 0
         if apply_out_quantization:
             assert self.rpu_config.forward.out_bound > 0, "Out quant. without a bound."
@@ -132,7 +122,6 @@ class AnalogLinear(Linear, AnalogLayerBase):
                 self.upper_end_of_slices,
                 self.rpu_config,
                 self.training,
-                apply_weight_modifier,
             )
             return out + self.bias if self.bias is not None else out
 
@@ -150,7 +139,6 @@ class AnalogLinear(Linear, AnalogLayerBase):
             self.in_sizes,
             self.training,
             self.rpu_config,
-            apply_weight_modifier,
             apply_out_quantization,
         )
         return out

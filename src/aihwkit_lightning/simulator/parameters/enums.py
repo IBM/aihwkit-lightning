@@ -17,17 +17,11 @@
 from enum import Enum
 
 
-class WeightModifierType(Enum):
+class WeightNoiseInjectionType(Enum):
     """Weight modifier type."""
 
     NONE = "None"
     """No weight modifier. Nothing happens to the weight. """
-
-    DISCRETIZE = "Discretize"
-    """Quantize the weights."""
-
-    DISCRETIZE_PER_CHANNEL = "DiscretizePerChannel"
-    """Quantize the weights per channel."""
 
     ADD_NORMAL = "AddNormal"
     """Additive Gaussian noise."""
@@ -35,11 +29,18 @@ class WeightModifierType(Enum):
     ADD_NORMAL_PER_CHANNEL = "AddNormalPerChannel"
     """Additive Gaussian noise per channel."""
 
-    DISCRETIZE_ADD_NORMAL = "DiscretizeAddNormal"
-    """First discretize and then additive Gaussian noise."""
 
-    DISCRETIZE_ADD_NORMAL_PER_CHANNEL = "DiscretizeAddNormalPerChannel"
-    """First discretize per channel and then additive Gaussian noise per channel."""
+class WeightQuantizationType(Enum):
+    """Weight quantization type."""
+
+    NONE = "None"
+    """No weight quantizer. Nothing happens to the weight. """
+
+    DISCRETIZE = "Discretize"
+    """Quantize the weights."""
+
+    DISCRETIZE_PER_CHANNEL = "DiscretizePerChannel"
+    """Quantize the weights per channel."""
 
 
 class WeightClipType(Enum):

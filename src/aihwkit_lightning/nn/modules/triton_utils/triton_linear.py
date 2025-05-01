@@ -441,7 +441,6 @@ class TritonLinear(Function):
         upper_end_of_slices: Tensor,
         rpu_config: TorchInferenceRPUConfig,
         training: bool,
-        apply_weight_modifier: bool,
     ) -> Tensor:
         """
         Forward of the triton-based linear layer
@@ -457,7 +456,6 @@ class TritonLinear(Function):
                 split by 128-sized chunks
             rpu_config: The configuration for HW-aware training
             training: Are we in training or eval mode
-            apply_weight_modifier: Do we need to call the weight modifier kernel or not
 
         Returns:
             Gradients w.r.t. inputs, weights and input ranges.
@@ -517,7 +515,7 @@ class TritonLinear(Function):
         def weight_modifier_grid(meta):
             return (triton.cdiv(out_size, meta["BLOCK_SIZE_OUT"]),)
 
-        if apply_weight_modifier:
+        if training and rpu_config.modifier.std_dev > 0.0:
             modifier_std = rpu_config.modifier.std_dev
             modifier_seed = randint(2**31, (1,)).item()
             # bring the weight resolution into a state that we can interpret
@@ -539,7 +537,7 @@ class TritonLinear(Function):
                 assumed_wmax.stride(0),
                 assumed_wmax.stride(1),
                 # miscellaneous
-                rpu_config.modifier.type.value,
+                rpu_config.modifier.noise_type.value,
                 modifier_weight_res,
                 modifier_seed,
                 modifier_std,
@@ -725,7 +723,7 @@ class TritonLinear(Function):
             ir_grad *= input_range
             did_clamp_mask = upper_thresh | lower_thresh
             if decay > 0:
-                # - We shrink the input range if less than X% of the inputs are clipping.
+                # We shrink the input range if less than X% of the inputs are clipping.
                 # where X is 1-ir_params.input_min_percentage
                 percentage = 1.0 - (did_clamp_mask).sum().div(upper_thresh.numel())
                 ir_grad += decay * input_range * (percentage > input_min_percentage)
