@@ -32,3 +32,6 @@ try:
 except ImportError:
     pass
     # if this fails and shouldn't fail, an exception will be raised down the road and not here
+except RuntimeError as e:
+    if str(e) != "0 active drivers ([]). There should only be one.":
+        raise RuntimeError(e)

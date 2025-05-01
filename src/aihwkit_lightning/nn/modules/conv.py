@@ -48,6 +48,9 @@ try:
     TRITON_AVAIL = True
 except ImportError:
     print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
+except RuntimeError as e:
+    if str(e) != "0 active drivers ([]). There should only be one.":
+        raise RuntimeError(e)
 
 
 class _AnalogConvNd(AnalogLayerBase, _ConvNd):
