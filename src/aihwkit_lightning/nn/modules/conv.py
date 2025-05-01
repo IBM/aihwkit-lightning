@@ -29,6 +29,7 @@ from aihwkit_lightning.simulator.configs import (
     WeightClipType,
     WeightModifierType,
 )
+from aihwkit_lightning.nn.modules.torch_utils.torch_abs_max import sliced_abs_max
 
 
 def is_at_least_volta_gpu():
@@ -118,6 +119,15 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             dtype=dtype,
         )
 
+        self.init_learnable_weight_ranges(
+            init_value=sliced_abs_max(
+                upper_end_of_slices=self.upper_end_of_slices,
+                weights=self.weight.view(self.out_channels, -1),
+            ),
+            device=device,
+            dtype=dtype,
+        )
+
     def get_tile_size(self, in_channels: int, groups: int, kernel_size: Tuple[int, ...]) -> int:
         """Calculate the tile size."""
         return (in_channels // groups) * reduce(lambda x, y: x * y, kernel_size)
@@ -202,6 +212,15 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             assert self.rpu_config.pre_post.input_range.enable, "Out quant. without IR."
         # apply_out_quantization entails out_bound > 0
 
+        if self.rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
+            assert (
+                self.learnable_weight_clip is not None
+            ), "Learnable weight clipping tensor not initialized."
+            assert self.learnable_weight_clip.size(0) == len(self.upper_end_of_slices), (
+                "Learnable weight clipping tensor must have the same number of rows as slices"
+                " you have for the weight matrix."
+            )
+
         im_shape = x_input.shape
         assert isinstance(self.padding, tuple), "Padding must be a tuple"
         x_input_ = (
@@ -240,6 +259,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 input_range_update_idx=self.input_range_update_idx,
                 x_min=self.x_min,
                 x_max=self.x_max,
+                learnable_weight_clip=self.learnable_weight_clip,
                 in_sizes=self.in_sizes,
                 training=self.training,
                 rpu_config=self.rpu_config,
@@ -546,7 +566,7 @@ class AnalogConv2d(_AnalogConvNd):
         clip_type = self.rpu_config.clip.type
         clip_sigma = self.rpu_config.clip.sigma
 
-        if clip_type == WeightClipType.NONE:
+        if clip_type in [WeightClipType.NONE, WeightClipType.LEARNABLE_PER_CHANNEL]:
             return
         assert clip_sigma > 0, "Clip sigma must be greater than 0"
         sigma_std = clip_sigma * two_dim_weights.std(
