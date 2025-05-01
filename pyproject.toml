@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools"]
+
+[project]
+requires-python = ">= 3.8"
+name = "aihwkit_lightning"
+version = "2.0.0"
+authors = [
+  {name = "Corey Lammie", email = "corey.lammie@ibm.com"},
+  {name = "William Simon", email = "william.simon1@ibm.com"},
+  {name = "Julian Buechel", email = "jub@zurich.ibm.com"},
+]
+maintainers = [
+  {name = "Julian Buechel", email = "jub@zurich.ibm.com"}
+]
+description = "IBM Analog Hardware Acceleration Kit - Lightning"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENCSE.TXT"]
+keywords = [
+    "ai",
+    "analog",
+    "rpu",
+    "torch",
+    "memristor",
+    "pcm",
+    "reram",
+    "crossbar",
+    "in-memory",
+    "nvm",
+    "non-von-neumann",
+    "non-volatile memory",
+    "phase-change material"
+]
+[project.urls]
+Paper = "https://openreview.net/forum?id=QNdxOgGmhR"
+Documentation = "https://aihwkit-lightning.readthedocs.io/en/latest/"
+Repository = "https://github.com/IBM/aihwkit-lightning"
+Issues = "https://github.com/IBM/aihwkit-lightning/issues"
+Changelog = "https://github.com/IBM/aihwkit-lightning/blob/main/CHANGELOG.md"
