@@ -223,17 +223,6 @@ def test_pareto_q_correctness(
     assert allclose(aihwkit_grad, orig_grad, atol=atol), "Gradients don't match"
 
 
-# def test_load_state_dict():
-#     # when new weights are loaded into a layer
-#     # and we learn these ranges, they need to be updated.
-#     raise NotImplementedError
-
-
-# def test_call_clip():
-#     # post-training, weights should be clippable with module.clip_weights()
-#     raise NotImplementedError
-
-
 def get_rpu_config(
     modifier_res: int, quantization_type: WeightQuantizationType
 ) -> TorchInferenceRPUConfig:
