@@ -14,7 +14,6 @@ or with
 
 ```bash
 git clone git@github.com:IBM/aihwkit-lightning.git
-pip install scikit-build
 cd aihwkit-lightning
 pip install -e .
 ```
