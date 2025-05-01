@@ -4,9 +4,23 @@
 [![Documentation Status](https://readthedocs.org/projects/aihwkit_lightning/badge/?version=latest)](https://aihwkit_lightning.readthedocs.io/en/latest/?badge=latest)
 [![Build Status](https://app.travis-ci.com/IBM/aihwkit-lightning.svg?token=nYQJ7muZkSyoDYxxh5yc&branch=main)](https://travis-ci.com/IBM/aihwkit-lightning)
 
-## Installation
-You can install AIHWKIT-Lightning with
+## Installing a previous version
+For version `v1.0.0`, you can do
+```bash
+pip install scikit-build
+pip install git+https://github.com/IBM/aihwkit-lightning.git@v1.0.0
+```
+or with
 
+```bash
+git clone git@github.com:IBM/aihwkit-lightning.git
+pip install scikit-build
+git checkout v1.0.0
+cd aihwkit-lightning
+pip install -e .
+```
+
+## Installing the nightly version
 ```bash
 pip install git+https://github.com/IBM/aihwkit-lightning.git
 ```
