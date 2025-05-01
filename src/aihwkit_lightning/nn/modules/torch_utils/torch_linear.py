@@ -363,6 +363,10 @@ class TorchLinear:
                 rpu_config=rpu_config,
             )
             if rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
+                assert rpu_config.modifier.quantization_type in [
+                    WeightQuantizationType.NONE,
+                    WeightQuantizationType.DISCRETIZE_PER_CHANNEL,
+                ], "You can't learn weight ranges per column but quantize per tensor"
                 # we just clipped. the assumed_wmax is therefore tighter.
                 assert assumed_wmax is not None and isinstance(
                     assumed_wmax, Tensor
@@ -370,7 +374,7 @@ class TorchLinear:
                 assert learnable_weight_clip is not None and isinstance(
                     learnable_weight_clip, Tensor
                 ), "learnable_weight_clip here must be tensor"
-                assumed_wmax = learnable_weight_clip.view_as(assumed_wmax)
+                assumed_wmax = learnable_weight_clip[slice_idx].view_as(assumed_wmax)
 
             if training:
                 modified_slice = TorchLinear.modify_weight(

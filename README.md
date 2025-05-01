@@ -19,12 +19,6 @@ cd aihwkit-lightning
 pip install -e .
 ```
 
-For the `triton` mode to work, you need to have >= GPU compute capability 7.0 (e.g. V100, A100, H100) and have `triton` installed.
-Currently, only the nightly version works, which can be installed using
-```bash
-pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ triton-nightly
-```
-
 ## Examples
 
 ### Basic Training
@@ -96,6 +90,23 @@ make pylint
 All of these should pass.
 
 ## `triton` mode
+
+For [triton](https://triton-lang.org/main/index.html) on a CPU, you can build it using
+```bash
+git clone https://github.com/triton-lang/triton.git;
+cd triton/python;
+pip install ninja cmake wheel; # build-time dependencies
+pip install -e .
+```
+and then when you want to run/test stuff in triton on a CPU, you can prepend `TRITON_CPU_BACKEND=1` before your script.
+This is a feature added from [Triton-CPU](https://github.com/triton-lang/triton-cpu). This mode is very handy for debugging.
+
+For [triton](https://triton-lang.org/main/index.html) on a GPU, you need to have >= GPU compute capability 7.0 (e.g. V100, A100, H100) and have
+triton installed. Currently, only the nightly version works, which can be installed using
+```bash
+pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ triton-nightly
+```
+
 AIHWKIT-Lightning can be accelerated using [triton](https://triton-lang.org/main/index.html). This generally only makes sense when your layer sizes are in the thousands and when you want to split the layer into multiple tiles (only across the input dimension is supported).
 To enable triton for `AnalogConv2d` and `AnalogLinear`, either `export AIHWKIT_USE_TRITON="1"` or execute your script as such `AIHWKIT_USE_TRITON="1" python your_script.py`. This feature is off by default.
 

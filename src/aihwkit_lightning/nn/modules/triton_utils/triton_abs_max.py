@@ -18,30 +18,30 @@ from torch import full, Tensor, float32, int32, tensor
 
 
 # fmt: off
-@triton.autotune(
-    # pylint: disable=line-too-long
-    configs=[
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-    ],
-    key=["n_cols", "n_rows"],
-    reset_to_zero=["per_channel_amax_ptr"],
-)
+# @triton.autotune(
+#     # pylint: disable=line-too-long
+#     configs=[
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#     ],
+#     key=["n_cols", "n_rows"],
+#     reset_to_zero=["per_channel_amax_ptr"],
+# )
 @triton.jit
 def sliced_fast_abs_max_kernel(  # pylint: disable=too-many-arguments
     weights_ptr,
@@ -136,29 +136,29 @@ def sliced_fast_abs_max_kernel(  # pylint: disable=too-many-arguments
         lower_bound = upper_bound
 
 
-@triton.autotune(
-    # pylint: disable=line-too-long
-    configs=[
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-        triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
-    ],
-    key=["n_cols", "n_rows"],
-    reset_to_zero=["per_channel_amax_ptr"],
-)
+# @triton.autotune(
+#     # pylint: disable=line-too-long
+#     configs=[
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 64}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 128}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 64, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 128, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#         triton.Config({"BLOCK_SIZE_N_COLS": 256, "BLOCK_SIZE_N_ROWS": 256}, num_stages=3, num_warps=8),  # noqa: E501
+#     ],
+#     key=["n_cols", "n_rows"],
+#     reset_to_zero=["per_channel_amax_ptr"],
+# )
 @triton.jit
 def fast_abs_max_kernel(
     weights_ptr,
@@ -253,14 +253,7 @@ def fast_abs_max(weights: Tensor):
         )
 
     fast_abs_max_kernel[grid](
-        weights,
-        per_channel_amax,
-        weights.stride(0),
-        weights.stride(1),
-        n_cols,
-        n_rows,
-        # 32,
-        # 32
+        weights, per_channel_amax, weights.stride(0), weights.stride(1), n_cols, n_rows, 32, 32
     )
 
     per_channel_amax = per_channel_amax.to(weights.dtype)
@@ -314,8 +307,8 @@ def sliced_fast_abs_max(weights: Tensor, upper_end_of_slices: Tensor):
         n_splits,
         n_cols,
         n_rows,
-        # 32,
-        # 32,
+        32,
+        32,
     )
 
     per_channel_amax = per_channel_amax.to(weights.dtype)

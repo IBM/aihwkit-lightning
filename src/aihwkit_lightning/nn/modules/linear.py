@@ -119,6 +119,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
                 modified_weights,
                 self.input_range,
                 self.input_range_update_idx,
+                self.learnable_weight_clip,
                 self.upper_end_of_slices,
                 self.rpu_config,
                 self.training,
