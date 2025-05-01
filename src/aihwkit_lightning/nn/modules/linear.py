@@ -23,6 +23,7 @@ from aihwkit_lightning.simulator.configs import (
 )
 from aihwkit_lightning.nn.modules.base import AnalogLayerBase
 from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
+from aihwkit_lightning.nn.modules.torch_utils.torch_abs_max import sliced_abs_max
 
 
 def is_at_least_volta_gpu():
@@ -83,6 +84,14 @@ class AnalogLinear(Linear, AnalogLayerBase):
             dtype=dtype,
         )
 
+        self.init_learnable_weight_ranges(
+            init_value=sliced_abs_max(
+                upper_end_of_slices=self.upper_end_of_slices, weights=self.weight
+            ),
+            device=device,
+            dtype=dtype,
+        )
+
     def forward(self, inp: Tensor) -> Tensor:  # pylint: disable=arguments-renamed
         """Forward function."""
 
@@ -99,6 +108,15 @@ class AnalogLinear(Linear, AnalogLayerBase):
         if apply_out_quantization:
             assert self.rpu_config.forward.out_bound > 0, "Out quant. without a bound."
             assert self.rpu_config.pre_post.input_range.enable, "Out quant. without IR."
+
+        if self.rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
+            assert (
+                self.learnable_weight_clip is not None
+            ), "Learnable weight clipping tensor not initialized."
+            assert self.learnable_weight_clip.size(0) == len(self.upper_end_of_slices), (
+                "Learnable weight clipping tensor must have the same number of rows as slices"
+                " you have for the weight matrix."
+            )
         # apply_out_quantization entails out_bound > 0
 
         triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
@@ -128,6 +146,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
             self.input_range_update_idx,
             self.x_min,
             self.x_max,
+            self.learnable_weight_clip,
             self.in_sizes,
             self.training,
             self.rpu_config,
@@ -220,6 +239,13 @@ class AnalogLinear(Linear, AnalogLayerBase):
             self.weight.shape == weight.shape
         ), f"weight shape mismatch. Got {weight.shape}, expected {self.weight.shape}"
         self.weight.data = weight.detach().clone()
+        self.init_learnable_weight_ranges(
+            init_value=sliced_abs_max(
+                upper_end_of_slices=self.upper_end_of_slices, weights=self.weight
+            ),
+            device=weight.device,
+            dtype=weight.dtype,
+        )
 
     def set_weights_and_biases(self, weight: Tensor, bias: Optional[Tensor] = None) -> None:
         """Set the weight (and bias) tensors to the analog crossbar. Creates a copy of the tensors.
@@ -248,7 +274,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
         clip_type = self.rpu_config.clip.type
         clip_sigma = self.rpu_config.clip.sigma
 
-        if clip_type == WeightClipType.NONE:
+        if clip_type in [WeightClipType.NONE, WeightClipType.LEARNABLE_PER_CHANNEL]:
             return
         assert clip_sigma > 0, "Clip sigma must be greater than 0"
         sigma_std = clip_sigma * self.weight.std(

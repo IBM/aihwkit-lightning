@@ -17,6 +17,7 @@ from torch import device as torch_device
 from torch.nn import Parameter
 from torch import Tensor, empty, zeros
 from ...simulator.configs import TorchInferenceRPUConfig
+from ...simulator.parameters import WeightClipType
 
 
 class AnalogLayerBase:
@@ -94,13 +95,29 @@ class AnalogLayerBase:
         """Clip the weights of the analog layers."""
         return
 
+    def init_learnable_weight_ranges(
+        self, init_value: Tensor, device: torch_device, dtype: torch_dtype
+    ) -> None:
+        """Initializes parameters for learnable weight ranges."""
+
+        # pylint: disable=attribute-defined-outside-init
+
+        clip_config = self.rpu_config.clip
+        if clip_config.type == WeightClipType.LEARNABLE_PER_CHANNEL:
+            # do the init. take the weight sharding into consideration as well
+            self.learnable_weight_clip = Parameter(
+                data=init_value.to(dtype=dtype, device=device), requires_grad=True
+            )
+        else:
+            self.learnable_weight_clip = None  # type: ignore[assignment]
+
     def init_ir(
         self,
         device: torch_device,
         dtype: torch_dtype,
         init_value_ir: float,
         init_value_counter: int = 0,
-    ):
+    ) -> None:
         """Initialize input range parameters."""
 
         # pylint: disable=attribute-defined-outside-init

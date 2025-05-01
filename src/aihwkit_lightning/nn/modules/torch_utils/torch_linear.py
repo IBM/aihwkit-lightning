@@ -15,6 +15,7 @@ import os
 from typing import List, Tuple, Union
 from math import sqrt
 from torch import Tensor, randn_like, clamp, zeros_like, stack, finfo
+from torch import sum as torch_sum
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
 from aihwkit_lightning.simulator.configs import (
@@ -37,6 +38,8 @@ class UniformQuantize(Function):
         res: Union[Tensor, float, int],
         bound: Union[float, Tensor],
         inplace: bool,
+        learn_res: bool,
+        max_quant_state: Union[None, float],
     ) -> Tensor:
         """Quantizes the input tensor and performs straight-through estimation.
 
@@ -46,10 +49,13 @@ class UniformQuantize(Function):
             res (Tensor, float, int): Resolution (number of states).
             bound (Tensor, float, int): Output bound.
             inplace (bool): Clone the input?
+            learn_res (bool): Do we want to learn the ranges.
+            max_quant_state (nion[None, float]): 2**(n-bits -1)-1
 
         Returns:
             torch.Tensor: Quantized input.
         """
+        ctx.learn_res = learn_res  # type: ignore[attr-defined]
         # - Compute 1 / states if the number of states are provided
         alpha = 2 * bound
         if isinstance(res, Tensor) or isinstance(alpha, Tensor):
@@ -84,11 +90,20 @@ class UniformQuantize(Function):
                 assert is_testing, "_AIHWKIT_NO_ROUNDING was set but we are not in testing mode."
         # - Scale back down
         output *= res
+        if learn_res:
+            assert max_quant_state is not None, "max_quant_state should be float"
+            assert isinstance(clamped_res, Tensor), "clamped_res must be Tensor to be learnable"
+            # grad_scale = 1.0 / sqrt(inp.numel() * max_quant_state)
+            grad_scale = 2 * sqrt(max_quant_state / inp.numel())
+            ctx.save_for_backward(inp, clamped_res)
+            ctx.other = grad_scale, max_quant_state  # type: ignore[attr-defined]
         return output
 
     @staticmethod
     # type: ignore[override]
-    def backward(ctx: FunctionCtx, grad_output: Tensor) -> Tuple[Tensor, None, None, None, None]:
+    def backward(
+        ctx: FunctionCtx, grad_output: Tensor
+    ) -> Tuple[Tensor, Union[None, Tensor], None, None, None, None]:
         """Straight-through estimator.
 
         Args:
@@ -98,9 +113,31 @@ class UniformQuantize(Function):
         Returns:
             Gradients w.r.t. inputs to forward.
         """
-        # - Straight-through estimator
-        grad_input = grad_output
-        return grad_input, None, None, None, None
+        if ctx.learn_res:  # type: ignore[attr-defined]
+            inp, res = ctx.saved_tensors  # type: ignore[attr-defined]
+            grad_scale, quant_max = ctx.other  # type: ignore[attr-defined]
+            q_w = inp / res
+            indicate_small = (q_w < -quant_max).float()
+            indicate_big = (q_w > quant_max).float()
+            indicate_middle = (
+                1.0 - indicate_small - indicate_big
+            )  # this is more cpu-friendly than torch.ones(input_.shape)
+            grad_res = (
+                (
+                    indicate_small * (-quant_max)
+                    + indicate_big * quant_max
+                    + indicate_middle * (-q_w + q_w.round())
+                )
+                * grad_output
+                * grad_scale
+            )
+            grad_res = torch_sum(grad_res, dim=-1, keepdim=True)
+            grad_input = indicate_middle * grad_output
+        else:
+            grad_input = grad_output
+            grad_res = None
+
+        return grad_input, grad_res, None, None, None, None
 
 
 class StraightThroughClamp(Function):
@@ -198,6 +235,7 @@ class TorchLinear:
         input_range_update_idx: Union[None, Tensor],
         x_min: Union[None, Tensor],
         x_max: Union[None, Tensor],
+        learnable_weight_clip: Union[None, Tensor],
         in_sizes: List[int],
         training: bool,
         rpu_config: TorchInferenceRPUConfig,
@@ -259,7 +297,7 @@ class TorchLinear:
             if rpu_config.forward.inp_res > 0:
                 assert input_range is not None, "Input range must be provided"
                 inp_slice = UniformQuantize.apply(
-                    inp_slice, rpu_config.forward.inp_res, input_range[slice_idx], True
+                    inp_slice, rpu_config.forward.inp_res, input_range[slice_idx], True, False, None
                 )
 
             # do we meed assumed_wmax per-column or per-tensor? or not at all?
@@ -309,6 +347,12 @@ class TorchLinear:
                         if reduce_assumed_wmax_for_weight_modifier
                         else assumed_wmax
                     ),
+                    # bring into shape [num_columns, 1], same as assumed_wmax
+                    learnable_weight_clip=(
+                        None
+                        if learnable_weight_clip is None
+                        else learnable_weight_clip[slice_idx].unsqueeze(-1)
+                    ),
                     rpu_config=rpu_config,
                 )
             else:
@@ -353,7 +397,7 @@ class TorchLinear:
                     )  # type: ignore[union-attr]
                 if apply_out_quantization:
                     out_slice = UniformQuantize.apply(
-                        out_slice, rpu_config.forward.out_res, bound, True
+                        out_slice, rpu_config.forward.out_res, bound, True, False, None
                     )
                 if rpu_config.forward.out_bound > 0:
                     out_slice = clamp(out_slice, min=-bound, max=bound)
@@ -474,13 +518,17 @@ class TorchLinear:
 
     @staticmethod
     def modify_weight(
-        inp_weight: Tensor, assumed_wmax: Union[Tensor, None], rpu_config: TorchInferenceRPUConfig
+        inp_weight: Tensor,
+        assumed_wmax: Union[Tensor, None],
+        learnable_weight_clip: Union[Tensor, None],
+        rpu_config: TorchInferenceRPUConfig,
     ) -> Tensor:
         """Modifies weights in-place, so .clone() before passing the weights here.
 
         Args:
             inp_weight: Input weights.
             assumed_wmax: Assumed maximum weight value.
+            learnable_weight_clip: The learnable per-column clipping values.
             rpu_config: RPUConfig used.
 
         Raises:
@@ -493,6 +541,21 @@ class TorchLinear:
         if modifier.type == WeightModifierType.NONE:
             return inp_weight
 
+        max_quant_state = None
+        learnable_weight_clipping = rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL
+        if learnable_weight_clipping:
+            assert learnable_weight_clip is not None, "learnable_weight_clip should not be None"
+            assert learnable_weight_clip.shape == (
+                inp_weight.size(0),
+                1,
+            ), f"learnable_weight_clip.shape must be ({inp_weight.size(0)}, 1)"
+            assert modifier.type in [
+                WeightModifierType.DISCRETIZE,
+                WeightModifierType.DISCRETIZE_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+            ], "If you learn the clipping ranges, you must use quantization."
+
         assert assumed_wmax is not None, "Assumed wmax must be provided for weight modifier"
         if modifier.type in [
             WeightModifierType.DISCRETIZE,
@@ -502,15 +565,21 @@ class TorchLinear:
         ]:
             res = modifier.res
             n_states = max(res, 1 / res)
-            # assumed_wamax.item() would result in fp16 imprecision
-            res = assumed_wmax / n_states  # type: ignore[assignment]
+            max_quant_state = n_states / 2
+            if learnable_weight_clipping:
+                assert learnable_weight_clip is not None, "learnable_weight_clip should not be None"
+                res = learnable_weight_clip / n_states  # type: ignore[assignment]
+            else:
+                res = assumed_wmax / n_states  # type: ignore[assignment]
 
         if modifier.type in [
             WeightModifierType.DISCRETIZE,
             WeightModifierType.DISCRETIZE_PER_CHANNEL,
         ]:
             # - Discretize the weights on the fly and backprob through them
-            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, False)
+            inp_weight = UniformQuantize.apply(
+                inp_weight, res, 1.0, False, learnable_weight_clipping, max_quant_state
+            )
         elif modifier.type in [
             WeightModifierType.ADD_NORMAL,
             WeightModifierType.ADD_NORMAL_PER_CHANNEL,
@@ -522,7 +591,9 @@ class TorchLinear:
             WeightModifierType.DISCRETIZE_ADD_NORMAL,
             WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
         ]:
-            inp_weight = UniformQuantize.apply(inp_weight, res, 1.0, False)
+            inp_weight = UniformQuantize.apply(
+                inp_weight, res, 1.0, False, learnable_weight_clipping, max_quant_state
+            )
             with no_grad():
                 noise = modifier.std_dev * assumed_wmax * randn_like(inp_weight)
             inp_weight = inp_weight + noise
