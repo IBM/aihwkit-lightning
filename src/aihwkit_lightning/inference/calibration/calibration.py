@@ -26,7 +26,7 @@ from torch.nn import Parameter
 from torch.nn.modules.module import RemovableHandle
 
 from aihwkit_lightning.exceptions import ConfigError
-from aihwkit_lightning.simulator.configs import WeightModifierType
+from aihwkit_lightning.simulator.configs import WeightNoiseInjectionType
 from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from aihwkit_lightning.nn.modules.container import AnalogWrapper
@@ -254,7 +254,7 @@ def calibrate_input_ranges(
         # generate hook
         old_rpu_config[layer_name] = deepcopy(layer.rpu_config)
         layer.rpu_config.forward.out_noise = 0.0
-        layer.rpu_config.modifier.type = WeightModifierType.NONE
+        layer.rpu_config.modifier.noise_type = WeightNoiseInjectionType.NONE
 
         cache[layer_name] = tensor([])
         hook = partial(

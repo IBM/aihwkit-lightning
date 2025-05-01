@@ -138,8 +138,8 @@ We now define that part of the RPU Configuration:
 
 .. code-block:: python
 
-    from aihwkit_lightning.simulator.configs import WeightModifierType
-    rpu_config.modifier.type = WeightModifierType.ADD_NORMAL_PER_CHANNEL
+    from aihwkit_lightning.simulator.configs import WeightNoiseInjectionType
+    rpu_config.modifier.noise_type = WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL
     rpu_config.modifier.std_dev = 0.05
 
 This simply adds Gaussian noise which is scaled with respect to the magnitude of the weights:
@@ -149,8 +149,8 @@ This simply adds Gaussian noise which is scaled with respect to the magnitude of
         & \mathbf{W^\text{noisy}}_{:,i} \leftarrow  \mathbf{W}_{:,i} + \mathbf{\eta_i} \\
         & \mathbf{\eta_i} = \nonumber
         \begin{cases}
-            \gamma_\text{weight} \cdot {\mathtt{max}}({\mathtt{abs}}(\mathbf{W}_{:,i})) \cdot \tau & \text{if } \mathtt{WeightModifierType.ADD\_NORMAL\_PER\_CHANNEL} \\
-            \gamma_\text{weight} \cdot {\mathtt{max}}({\mathtt{abs}}(\mathbf{W})) \cdot \tau & \text{if } \mathtt{WeightModifierType.ADD\_NORMAL} \\
+            \gamma_\text{weight} \cdot {\mathtt{max}}({\mathtt{abs}}(\mathbf{W}_{:,i})) \cdot \tau & \text{if } \mathtt{WeightNoiseInjectionType.ADD\_NORMAL\_PER\_CHANNEL} \\
+            \gamma_\text{weight} \cdot {\mathtt{max}}({\mathtt{abs}}(\mathbf{W})) \cdot \tau & \text{if } \mathtt{WeightNoiseInjectionType.ADD\_NORMAL} \\
             \text{where } \tau \sim \mathcal{N}(\mathbf{0},\mathbf{I}) & \\
         \end{cases}
     \end{align}

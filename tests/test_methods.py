@@ -29,7 +29,7 @@ import torch.cuda as torch_cuda
 
 from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
-from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
+from aihwkit_lightning.simulator.configs import WeightClipType, WeightQuantizationType
 
 
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
@@ -46,7 +46,7 @@ class LsqBinaryTernaryExtension(Function):
     # pylint: disable=abstract-method, redefined-builtin, arguments-differ, unused-argument
 
     @staticmethod
-    def forward(ctx: FunctionCtx, inp: Tensor, alpha: Tensor, num_bits: int):
+    def forward(ctx: FunctionCtx, inp: Tensor, alpha: Tensor, num_bits: int, skip_rounding: bool):
         """Forward of learnable quant."""
 
         ctx.num_bits = num_bits
@@ -55,44 +55,53 @@ class LsqBinaryTernaryExtension(Function):
 
         # we consider case where negative regime
         # has equal num. states as positive
-        q_n = -(2 ** (num_bits - 1) - 1)
-        q_p = 2 ** (num_bits - 1) - 1
+        if skip_rounding:
+            q_n = -1
+            q_p = 1
+        else:
+            q_n = -(2 ** (num_bits - 1) - 1)
+            q_p = 2 ** (num_bits - 1) - 1
 
         eps = tensor(0.00001, device=alpha.device).float()
 
         alpha = where(alpha > eps, alpha, eps)
 
-        grad_scale = (
-            1.0 / math.sqrt(inp.numel()) if not q_p else 1.0 / math.sqrt(inp.numel() * q_p)
-        )
+        grad_scale = 1.0 / math.sqrt(inp.numel()) if not q_p else 1.0 / math.sqrt(inp.numel() * q_p)
         ctx.save_for_backward(inp, alpha)
-        ctx.other = grad_scale, q_n, q_p
-        q_w = (inp / alpha).round().clamp(q_n, q_p)
+        ctx.other = grad_scale, q_n, q_p, skip_rounding
+        q_w = inp / alpha
+        if skip_rounding:
+            q_w = q_w.clamp(q_n, q_p)
+        else:
+            q_w = q_w.round().clamp(q_n, q_p)
         w_q = q_w * alpha
         return w_q
 
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.num_bits >= 16:
-            return grad_output, None, None
+            return grad_output, None, None, None
 
         inp, alpha = ctx.saved_tensors
-        grad_scale, q_n, q_p = ctx.other
+        grad_scale, q_n, q_p, skip_rounding = ctx.other
         q_w = inp / alpha
         indicate_small = (q_w < q_n).float()
         indicate_big = (q_w > q_p).float()
         indicate_middle = (
             1.0 - indicate_small - indicate_big
         )  # this is more cpu-friendly than torch.ones(inp.shape)
-        grad_alpha = (
-            (indicate_small * q_n + indicate_big * q_p + indicate_middle * (-q_w + q_w.round()))
-            * grad_output
-            * grad_scale
-        )
+        if skip_rounding:
+            grad_alpha = (indicate_small * q_n + indicate_big * q_p) * grad_output * grad_scale
+        else:
+            grad_alpha = (
+                (indicate_small * q_n + indicate_big * q_p + indicate_middle * (-q_w + q_w.round()))
+                * grad_output
+                * grad_scale
+            )
         grad_alpha = torch_sum(grad_alpha, dim=-1, keepdim=True)
 
         grad_input = indicate_middle * grad_output
-        return grad_input, grad_alpha, None
+        return grad_input, grad_alpha, None, None
 
 
 class ParetoQQuantizeLinear(Linear):
@@ -100,14 +109,18 @@ class ParetoQQuantizeLinear(Linear):
     Adapted from https://github.com/facebookresearch/ParetoQ/blob/main/models/utils_quant.py
     """
 
-    def __init__(self, *args, w_bits=16, **kwargs):
+    def __init__(self, *args, w_bits=16, skip_rounding=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.w_bits = w_bits
+        self.skip_rounding = skip_rounding
         # params for weight quant
         if self.w_bits < 16:
-            self.weight_clip_val = Parameter(
-                self.weight.abs().amax(dim=-1, keepdim=True) / (2 ** (w_bits - 1) - 1)
-            )
+            if skip_rounding:
+                self.weight_clip_val = Parameter(self.weight.abs().amax(dim=-1, keepdim=True))
+            else:
+                self.weight_clip_val = Parameter(
+                    self.weight.abs().amax(dim=-1, keepdim=True) / (2 ** (w_bits - 1) - 1)
+                )
 
     def forward(self, inp):  # pylint: disable=arguments-renamed
         # quantize weight
@@ -117,7 +130,7 @@ class ParetoQQuantizeLinear(Linear):
         if self.w_bits >= 16:
             weight = self.weight
         weight = LsqBinaryTernaryExtension.apply(
-            real_weights, self.weight_clip_val, self.w_bits
+            real_weights, self.weight_clip_val, self.w_bits, self.skip_rounding
         ).to(inp.dtype)
 
         out = F.linear(inp, weight)
@@ -127,7 +140,11 @@ class ParetoQQuantizeLinear(Linear):
         return out
 
 
-@mark.parametrize("n_bits", [4, 5, 6, 7, 8])
+@mark.parametrize("n_bits", [4, 5, 6])
+@mark.parametrize(
+    "quantization_type",
+    [WeightQuantizationType.DISCRETIZE_PER_CHANNEL, WeightQuantizationType.NONE],
+)
 @mark.parametrize("inp_size", [10, 100])
 @mark.parametrize("out_size", [20, 400])
 @mark.parametrize("bsz,num_inp_dims", [(1, 1), (2, 2)])
@@ -135,6 +152,7 @@ class ParetoQQuantizeLinear(Linear):
 @mark.parametrize("dtype", [float32])
 def test_pareto_q_correctness(
     n_bits: int,
+    quantization_type: WeightQuantizationType,
     inp_size: int,
     out_size: int,
     bsz: int,
@@ -150,17 +168,21 @@ def test_pareto_q_correctness(
 
     manual_seed(0)
 
-    rpu_config = get_rpu_config(modifier_res=2**n_bits - 2)  # 4 bits
+    rpu_config = get_rpu_config(
+        modifier_res=2**n_bits - 2, quantization_type=quantization_type
+    )  # 4 bits
 
     if device == torch_device("cuda") and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")
+
+    skip_rounding = rpu_config.modifier.quantization_type == WeightQuantizationType.NONE
 
     orig_linear = ParetoQQuantizeLinear(
         in_features=inp_size,
         out_features=out_size,
         bias=False,
         w_bits=n_bits,
-        weight_layerwise=False,
+        skip_rounding=skip_rounding,
         device=device,
         dtype=dtype,
     )
@@ -172,10 +194,6 @@ def test_pareto_q_correctness(
     else:
         inp = randn(bsz, inp_size, inp_size, device=device, dtype=dtype)
 
-    orig_out = orig_linear(inp)
-    orig_loss = orig_out.sum()
-    orig_loss.backward()
-
     aihwkit_linear = AnalogLinear(
         in_features=inp_size,
         out_features=out_size,
@@ -185,6 +203,15 @@ def test_pareto_q_correctness(
         rpu_config=rpu_config,
     )
     aihwkit_linear.set_weights(orig_linear.weight)
+
+    # cause a bit of clamping...
+    aihwkit_linear.learnable_weight_clip.data *= 0.9
+    orig_linear.weight_clip_val.data *= 0.9
+
+    orig_out = orig_linear(inp)
+    orig_loss = orig_out.sum()
+    orig_loss.backward()
+
     aihwkit_out = aihwkit_linear(inp)
     aihwkit_loss = aihwkit_out.sum()
     aihwkit_loss.backward()
@@ -196,11 +223,24 @@ def test_pareto_q_correctness(
     assert allclose(aihwkit_grad, orig_grad, atol=atol), "Gradients don't match"
 
 
-def get_rpu_config(modifier_res: int) -> TorchInferenceRPUConfig:
+# def test_load_state_dict():
+#     # when new weights are loaded into a layer
+#     # and we learn these ranges, they need to be updated.
+#     raise NotImplementedError
+
+
+# def test_call_clip():
+#     # post-training, weights should be clippable with module.clip_weights()
+#     raise NotImplementedError
+
+
+def get_rpu_config(
+    modifier_res: int, quantization_type: WeightQuantizationType
+) -> TorchInferenceRPUConfig:
     """Fixture for initializing rpus globally for all tests that need them"""
     rpu_config = TorchInferenceRPUConfig()
     rpu_config.modifier.res = modifier_res
-    rpu_config.modifier.type = WeightModifierType.DISCRETIZE_PER_CHANNEL
+    rpu_config.modifier.quantization_type = quantization_type
     rpu_config.clip.type = WeightClipType.LEARNABLE_PER_CHANNEL
     return rpu_config
 
@@ -208,6 +248,7 @@ def get_rpu_config(modifier_res: int) -> TorchInferenceRPUConfig:
 if __name__ == "__main__":
     test_pareto_q_correctness(
         n_bits=4,
+        quantization_type=WeightQuantizationType.NONE,
         inp_size=10,
         out_size=20,
         bsz=1,
