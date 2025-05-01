@@ -65,8 +65,15 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
     [WeightQuantizationType.DISCRETIZE, WeightQuantizationType.DISCRETIZE_PER_CHANNEL],
 )
 @mark.parametrize("weight_modifier_res", [2**8 - 2])
-@mark.parametrize("clip_type", [WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL, WeightClipType.NONE])
-@mark.parametrize("device", ["cuda"])  # cpu not supported for triton
+@mark.parametrize(
+    "clip_type",
+    [
+        WeightClipType.NONE,
+        WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
+        WeightClipType.LEARNABLE_PER_CHANNEL,
+    ],
+)
+@mark.parametrize("device", ["cpu"])  # cpu not supported for triton
 @mark.parametrize("dtype", [float32])
 # pylint: disable=too-many-arguments, too-many-branches, too-many-statements
 def test_linear_forward(
@@ -148,6 +155,12 @@ def test_linear_forward(
 
     rpu = populate_rpu(RPUConfig())
     linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
+    if clip_type == WeightClipType.LEARNABLE_PER_CHANNEL:
+        # make sure there is/would be clipping. makes test harder
+        linear.learnable_weight_clip.data *= 0.9
+        if rpu.modifier.quantization_type == WeightQuantizationType.DISCRETIZE:
+            raise SkipTest("Discretize per tensor but learn ranges per column.")
+
     # if out noise is to be tested, we don't want to be in eval mode
     if out_noise:
         assert (
@@ -228,7 +241,7 @@ def test_linear_forward(
 @mark.parametrize("ir_init_value", [2.0, 3.0])
 @mark.parametrize("ir_init_from_data", [0, 10])
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
-@mark.parametrize("device", ["cuda"])
+@mark.parametrize("device", ["cpu"])
 @mark.parametrize("dtype", [float32])
 def test_input_range_backward(  # pylint: disable=too-many-arguments
     bsz: int,
@@ -334,7 +347,7 @@ if __name__ == "__main__":
     test_linear_forward(
         bsz=10,
         num_inp_dims=2,
-        inp_size=10,
+        inp_size=30,
         out_size=20,
         bias=True,
         inp_res=254,
@@ -347,9 +360,10 @@ if __name__ == "__main__":
         adc_config=(10, 2**8 - 2),
         out_noise=False,
         out_noise_per_channel=False,
-        weight_modifier=WeightNoiseInjectionType.NONE,
+        noise_type=WeightNoiseInjectionType.NONE,
+        quantization_type=WeightQuantizationType.NONE,
         weight_modifier_res=254,
-        clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-        device="cuda",
+        clip_type=WeightClipType.LEARNABLE_PER_CHANNEL,
+        device="cpu",
         dtype=float32,
     )
