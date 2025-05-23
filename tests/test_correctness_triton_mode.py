@@ -58,7 +58,7 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("weight_modifier", [WeightModifierType.NONE])
 @mark.parametrize("weight_modifier_res", [2**8 - 2])
 @mark.parametrize("clip_type", [WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL, WeightClipType.NONE])
-@mark.parametrize("device", ["cuda"])  # cpu not supported for triton
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
 @mark.parametrize("dtype", [float32])
 # pylint: disable=too-many-arguments, too-many-branches, too-many-statements
 def test_linear_forward(

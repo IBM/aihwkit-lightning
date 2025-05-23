@@ -27,6 +27,7 @@ __pycache__/
 
 wandb/
 debug/
+**/benchmark_figures/
 
 # Distribution / packaging
 .Python

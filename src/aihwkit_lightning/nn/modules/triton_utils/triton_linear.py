@@ -17,18 +17,19 @@ import triton  # type: ignore
 import triton.language as tl  # type: ignore
 from torch.autograd import Function
 from torch.autograd.function import FunctionCtx
-from torch import Tensor, empty, float32, randint, zeros_like, clamp
-from aihwkit_lightning.nn.modules.triton_utils.triton_abs_max import sliced_fast_abs_max
-from aihwkit_lightning.nn.modules.triton_utils.triton_std import sliced_fast_std
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
+from torch import Tensor, cuda, empty, float32, randint, zeros_like, clamp
+from .triton_utils import lightning_autotune, requires_blocksizes
+from .triton_abs_max import sliced_fast_abs_max
+from .triton_std import sliced_fast_std
+from ....simulator.configs import TorchInferenceRPUConfig, WeightClipType
 
 
 FLOAT32_TINY: tl.constexpr = 1.1754943508222875e-38
 
 
 # fmt: off
-@triton.autotune(
-        # pylint: disable=line-too-long
+@lightning_autotune(
+    # pylint: disable=line-too-long
     configs=[
         triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64}, num_stages=3, num_warps=8),  # noqa: E501
         triton.Config({"BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 32}, num_stages=4, num_warps=4),  # noqa: E501
@@ -40,7 +41,8 @@ FLOAT32_TINY: tl.constexpr = 1.1754943508222875e-38
         triton.Config({"BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32}, num_stages=5, num_warps=2),  # noqa: E501
     ],
     key=["hidden_size", "out_size"],
-    restore_value=["weights_ptr"]
+    restore_value=["weights_ptr"],
+    enable=cuda.is_available()
 )
 @triton.jit
 def modifier_kernel(  # pylint: disable=too-many-arguments
@@ -148,7 +150,7 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
         ir_range_lower = ir_range_upper
 
 
-@triton.autotune(
+@lightning_autotune(
     # pylint: disable=line-too-long
     configs=[
         triton.Config({"BLOCK_SIZE_INP": 128, "BLOCK_SIZE_OUT": 256, "BLOCK_SIZE_HIDDEN": 64, "GROUP_SIZE_INP": 8}, num_stages=3, num_warps=8),  # noqa: E501
@@ -161,6 +163,7 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
         triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_OUT": 64, "BLOCK_SIZE_HIDDEN": 32, "GROUP_SIZE_INP": 8}, num_stages=5, num_warps=2),  # noqa: E501
     ],
     key=["inp_size", "hidden_size", "out_size"],
+    enable=cuda.is_available()
 )
 @triton.jit
 def matmul_kernel(
@@ -523,6 +526,7 @@ class TritonLinear(Function):
             # bring the weight resolution into a state that we can interpret
             modifier_weight_res = rpu_config.modifier.res
 
+            block_args = (32, 32) if modifier_kernel[weight_modifier_grid] else tuple()
             modifier_kernel[weight_modifier_grid](
                 # pointers to tensors
                 weights.T,  # 2D [hidden_size, out_size]
@@ -544,8 +548,7 @@ class TritonLinear(Function):
                 modifier_seed,
                 modifier_std,
                 # block sizes
-                # 32,  # for debugging
-                # 32,
+                *block_args,
             )
 
         # invoke kernel
@@ -602,6 +605,7 @@ class TritonLinear(Function):
         if os.environ.get("AIHWKIT_TESTING", None) == "1":
             precision = "ieee"
 
+        block_args = (64, 32, 128, 8) if requires_blocksizes(matmul_kernel, grid) else tuple()
         matmul_kernel[grid](
             inp,  # 2D [inp_size, hidden_size]
             weights.T,  # 2D [hidden_size, out_size]
@@ -644,10 +648,7 @@ class TritonLinear(Function):
             dtype,
             precision,
             # block sizes
-            # 64,  # This is for debugging
-            # 32,
-            # 128,
-            # 8,
+            *block_args,
         )
 
         # save some stuff for backwards

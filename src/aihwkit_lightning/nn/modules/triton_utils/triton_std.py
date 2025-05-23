@@ -14,11 +14,12 @@
 
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
-from torch import zeros, Tensor, float32, tensor, cat, sqrt, empty
+from torch import zeros, Tensor, float32, tensor, cat, sqrt, empty, cuda
+from .triton_utils import lightning_autotune, requires_blocksizes
 
 
 # fmt: off
-@triton.autotune(
+@lightning_autotune(
     # pylint: disable=line-too-long
     configs=[
         triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=1),  # noqa: E501
@@ -40,6 +41,7 @@ from torch import zeros, Tensor, float32, tensor, cat, sqrt, empty
     ],
     key=["inp_size", "hidden_size"],
     reset_to_zero=["per_slice_sum_ptr"],
+    enable=cuda.is_available()
 )
 @triton.jit
 def per_slice_sum_kernel(  # pylint: disable=too-many-locals
@@ -96,7 +98,7 @@ def per_slice_sum_kernel(  # pylint: disable=too-many-locals
         ir_range_lower = ir_range_upper
 
 
-@triton.autotune(
+@lightning_autotune(
     # pylint: disable=line-too-long
     configs=[
         triton.Config({"BLOCK_SIZE_INP": 32, "BLOCK_SIZE_HIDDEN": 32}, num_stages=3, num_warps=1),  # noqa: E501
@@ -118,6 +120,7 @@ def per_slice_sum_kernel(  # pylint: disable=too-many-locals
     ],
     key=["inp_size", "hidden_size"],
     reset_to_zero=["per_slice_centered_and_squared_ptr"],
+    enable=cuda.is_available()
 )
 @triton.jit
 def center_and_square_kernel(  # pylint: disable=too-many-locals, too-many-arguments
@@ -209,6 +212,7 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
     def per_slice_grid(meta):
         return (triton.cdiv(inp_size, meta["BLOCK_SIZE_INP"]),)
 
+    block_args = (32, 32) if requires_blocksizes(per_slice_sum_kernel, per_slice_grid) else tuple()
     per_slice_sum_kernel[per_slice_grid](
         inp,
         upper_end_of_slices,
@@ -218,12 +222,12 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
         num_slices,
         inp.stride(0),
         inp.stride(1),
-        # 32,
-        # 32,
+        *block_args,
     )
     per_slice_mean = per_slice_sum / num_inputs_per_slice
 
     per_slice_centered_and_squared = zeros((num_slices,), device=inp.device, dtype=float32)
+
     center_and_square_kernel[per_slice_grid](
         inp,
         upper_end_of_slices,
@@ -234,8 +238,7 @@ def sliced_fast_std(inp: Tensor, upper_end_of_slices: Tensor):
         num_slices,
         inp.stride(0),
         inp.stride(1),
-        # 32,
-        # 32
+        *block_args,
     )
     per_slice_std = sqrt(per_slice_centered_and_squared / (num_inputs_per_slice - 1))
     per_slice_std = per_slice_std.to(dtype=inp.dtype)

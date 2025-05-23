@@ -16,15 +16,16 @@
 
 from typing import Optional, Tuple, Union, List
 import os
+from copy import deepcopy
 from functools import reduce
 from torch import Tensor, cuda, tensor, int32
 from torch.nn.functional import unfold
 from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d
 from torch.nn.modules.utils import _single, _pair
 
-from aihwkit_lightning.nn.modules.base import AnalogLayerBase
-from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
-from aihwkit_lightning.simulator.configs import (
+from .base import AnalogLayerBase
+from .torch_utils.torch_linear import TorchLinear
+from ...simulator.configs import (
     TorchInferenceRPUConfig,
     WeightClipType,
     WeightModifierType,
@@ -186,7 +187,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         """
         return (self.weight, self.bias)
 
-    def forward(self, x_input: Tensor) -> Tensor:
+    def forward(self, inp: Tensor) -> Tensor:
         """Compute the forward pass."""
 
         modified_weights = self.weight
@@ -202,11 +203,11 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             assert self.rpu_config.pre_post.input_range.enable, "Out quant. without IR."
         # apply_out_quantization entails out_bound > 0
 
-        im_shape = x_input.shape
+        im_shape = inp.shape
         assert isinstance(self.padding, tuple), "Padding must be a tuple"
-        x_input_ = (
+        inp_ = (
             unfold(
-                x_input,
+                inp,
                 kernel_size=self.kernel_size,
                 dilation=self.dilation,
                 padding=self.padding,
@@ -221,7 +222,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         if TRITON_AVAIL and triton_enabled:
             self.upper_end_of_slices = self.upper_end_of_slices.to(device=modified_weights.device)
             out = TritonLinear.apply(
-                x_input_,
+                inp_,
                 modified_weights,
                 self.input_range,
                 self.input_range_update_idx,
@@ -233,7 +234,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             out = out + self.bias if self.bias is not None else out
         else:
             out = TorchLinear.linear(
-                inp=x_input_,
+                inp=inp_,
                 weights=modified_weights,
                 bias=self.bias,
                 input_range=self.input_range,
@@ -561,7 +562,7 @@ class AnalogConv2d(_AnalogConvNd):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         # pylint: disable=protected-access
-        destination._metadata[prefix.split(".")[0]]["rpu_config"] = self.rpu_config
+        destination._metadata[prefix.split(".")[0]]["rpu_config"] = deepcopy(self.rpu_config)
 
     def _load_from_state_dict(
         self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
@@ -570,4 +571,4 @@ class AnalogConv2d(_AnalogConvNd):
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
         )
         if "rpu_config" in local_metadata:
-            self.rpu_config = local_metadata["rpu_config"]
+            self.rpu_config = deepcopy(local_metadata["rpu_config"])

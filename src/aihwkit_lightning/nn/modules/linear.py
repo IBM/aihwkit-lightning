@@ -13,16 +13,17 @@
 """Module class for analog linear layer."""
 from typing import Optional, Tuple, List
 import os
+from copy import deepcopy
 from logging import warning
 from torch import Tensor, cuda, tensor, int32
 from torch.nn import Linear
-from aihwkit_lightning.simulator.configs import (
+from .base import AnalogLayerBase
+from .torch_utils.torch_linear import TorchLinear
+from ...simulator.configs import (
     TorchInferenceRPUConfig,
     WeightClipType,
     WeightModifierType,
 )
-from aihwkit_lightning.nn.modules.base import AnalogLayerBase
-from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
 
 
 def is_at_least_volta_gpu():
@@ -262,7 +263,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         # pylint: disable=protected-access
-        destination._metadata[prefix.split(".")[0]]["rpu_config"] = self.rpu_config
+        destination._metadata[prefix.split(".")[0]]["rpu_config"] = deepcopy(self.rpu_config)
 
     def _load_from_state_dict(
         self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
@@ -271,4 +272,4 @@ class AnalogLinear(Linear, AnalogLayerBase):
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
         )
         if "rpu_config" in local_metadata:
-            self.rpu_config = local_metadata["rpu_config"]
+            self.rpu_config = deepcopy(local_metadata["rpu_config"])
