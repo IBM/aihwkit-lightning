@@ -226,7 +226,7 @@ def test_linear_forward(
 @mark.parametrize("ir_init_value", [2.0, 3.0])
 @mark.parametrize("ir_init_from_data", [0, 10])
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
-@mark.parametrize("device", ["cuda"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
 @mark.parametrize("dtype", [float32])
 def test_input_range_backward(  # pylint: disable=too-many-arguments
     bsz: int,
