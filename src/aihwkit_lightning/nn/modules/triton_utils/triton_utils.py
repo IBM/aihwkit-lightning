@@ -37,6 +37,7 @@ def lightning_autotune(*args, enable: bool = False, **kwargs):
     """
     if enable:
         return autotune(*args, **kwargs)
+
     def decorator(fn):
         return fn
 
