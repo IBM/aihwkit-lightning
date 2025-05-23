@@ -332,9 +332,9 @@ class AnalogConv1d(_AnalogConvNd):
         self._register_state_dict_hook(self.return_pytorch_state_dict)
         self.tensor_view = (-1, 1)
 
-    def forward(self, x_input: Tensor) -> Tensor:
-        x_input_ = x_input.unsqueeze(-2)
-        y = super().forward(x_input_)
+    def forward(self, inp: Tensor) -> Tensor:
+        inp_ = inp.unsqueeze(-2)
+        y = super().forward(inp_)
         return y.squeeze(-2)
 
     @classmethod

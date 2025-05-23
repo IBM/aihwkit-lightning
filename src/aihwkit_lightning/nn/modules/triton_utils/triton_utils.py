@@ -20,14 +20,14 @@ def requires_blocksizes(fn, grid):
     Does this function require passing block sizes?
 
     Args:
-        fn : Function such as sliced_fast_abs_max_kernel[grid]
+        fn (callable) : Function such as sliced_fast_abs_max_kernel
+        grid (callable) : The grid used to launch the kernel
     Returns (bool) Whether this function requires passing block sizes.
     """
     if isinstance(fn, Autotuner):
         return False
-    else:
-        sig = signature(fn[grid].fn)
-        return any(["BLOCK_SIZE" in p.name for p in list(sig.parameters.values())])
+    sig = signature(fn[grid].fn)
+    return any("BLOCK_SIZE" in p.name for p in sig.parameters.values())
 
 
 def lightning_autotune(*args, enable: bool = False, **kwargs):
@@ -37,9 +37,7 @@ def lightning_autotune(*args, enable: bool = False, **kwargs):
     """
     if enable:
         return autotune(*args, **kwargs)
-    else:
+    def decorator(fn):
+        return fn
 
-        def decorator(fn):
-            return fn
-
-        return decorator
+    return decorator

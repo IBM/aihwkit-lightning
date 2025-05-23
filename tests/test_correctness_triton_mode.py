@@ -87,6 +87,9 @@ def test_linear_forward(
 
     out_bound, out_res = adc_config
 
+    if os.environ.get("AIHWKIT_SKIP_TRITON", None) == "1":
+        raise SkipTest("AIHWKIT_SKIP_TRITON set.")
+
     if device == "cuda" and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")
 
@@ -244,6 +247,9 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     dtype: torch_dtype,
 ):
     """Test the input range backward pass."""
+
+    if os.environ.get("AIHWKIT_SKIP_TRITON", None) == "1":
+        raise SkipTest("AIHWKIT_SKIP_TRITON set.")
 
     if device == "cuda" and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")

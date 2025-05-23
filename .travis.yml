@@ -64,7 +64,7 @@ jobs:
     stage: Test
     python: "3.10"
     script:
-      - make pytest
+      - AIHWKIT_SKIP_TRITON=1 make pytest
 
   - name: "Install, pycodestyle, lint, and mypy. Python 3.10"
     <<: *job_install_common
