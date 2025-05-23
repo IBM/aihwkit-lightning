@@ -1,26 +1,38 @@
-<img src="docs/assets/cover.png" alt="mamba header image" height="200"/>
+<div style="text-align: center;">
+<img src="docs/assets/cover.png" alt="cover" height="500"/>
+</div>
 
 # AIHWKIT-Lightning ⚡
 [![Documentation Status](https://readthedocs.org/projects/aihwkit_lightning/badge/?version=latest)](https://aihwkit_lightning.readthedocs.io/en/latest/?badge=latest)
 [![Build Status](https://app.travis-ci.com/IBM/aihwkit-lightning.svg?token=nYQJ7muZkSyoDYxxh5yc&branch=main)](https://travis-ci.com/IBM/aihwkit-lightning)
 
-## Installing a previous version
-For version `v1.0.0`, you can do
-```bash
-pip install scikit-build
-pip install git+https://github.com/IBM/aihwkit-lightning.git@v1.0.0
-```
-or with
+## What is AIHWKIT-Lightning?
+**A fast and scalable toolkit for hardware-aware training of large neural networks on Analog In-Memory Computing (AIMC) hardware.**
 
-```bash
-git clone git@github.com:IBM/aihwkit-lightning.git
-pip install scikit-build
-git checkout v1.0.0
-cd aihwkit-lightning
-pip install -e .
-```
+AIHWKIT-Lightning is a streamlined, performance-optimized toolkit designed for efficient hardware-aware training of large language models and neural networks deployed on analog in-memory computing systems. Built by IBM Research, it addresses the computational demands of training billion-parameter models with analog hardware non-idealities.
 
-## Installing the nightly version
+## Key Capabilities
+
+- **🚀 High Performance**: Up to 3.7× faster training compared to existing frameworks with lower memory consumption
+- **⚡ GPU-Accelerated**: Dedicated CUDA and Triton kernels for optimal performance on modern GPUs (V100, A100, H100)
+- **🎯 Hardware-Aware Training**: Simulates analog hardware non-idealities including:
+ - Weight and output noise injection
+ - Input/output quantization (DAC/ADC effects)
+ - Weight clipping and modification
+- **📈 Scalable**: Successfully demonstrated on models up to 3.8B parameters trained on billions of tokens
+- **🔧 Easy Integration**: Drop-in replacement for PyTorch layers with minimal code changes
+- **🎛️ Tiling Support**: Efficient handling of large weight matrices across multiple analog tiles
+
+## Relationship to AIHWKIT
+
+AIHWKIT-Lightning is a specialized, performance-focused toolkit that complements IBM's [AIHWKIT](https://github.com/IBM/aihwkit) - the comprehensive analog AI hardware simulation framework. While AIHWKIT offers extensive features for research and development with rich simulation capabilities, AIHWKIT-Lightning prioritizes speed and scalability for production-scale training:
+
+- **AIHWKIT**: Feature-rich, comprehensive simulation, ideal for research and prototyping
+- **AIHWKIT-Lightning**: Streamlined, fast, optimized for large-scale training
+
+Models can be easily converted between the two frameworks, allowing you to train efficiently with Lightning and then export to AIHWKIT for detailed analysis and inference simulation.
+
+## Installing the nightly version (recommended)
 ```bash
 pip install git+https://github.com/IBM/aihwkit-lightning.git
 ```
@@ -28,6 +40,24 @@ or with
 
 ```bash
 git clone git@github.com:IBM/aihwkit-lightning.git
+cd aihwkit-lightning
+pip install -e .
+```
+
+## Installing a previous version
+> Note: For previous versions, make sure your setuptools is at version `setuptools==75.1.0`.
+
+For version `v1.0.1`, you can do
+```bash
+pip install scikit-build
+pip install git+https://github.com/IBM/aihwkit-lightning.git@v1.0.1
+```
+or with
+
+```bash
+git clone git@github.com:IBM/aihwkit-lightning.git
+pip install scikit-build
+git checkout v1.0.1
 cd aihwkit-lightning
 pip install -e .
 ```

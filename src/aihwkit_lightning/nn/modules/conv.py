@@ -16,16 +16,17 @@
 
 from typing import Optional, Tuple, Union, List
 import os
+from copy import deepcopy
 from functools import reduce
 from torch import Tensor, cuda, tensor, int32
 from torch.nn.functional import unfold
 from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d
 from torch.nn.modules.utils import _single, _pair
 
-from aihwkit_lightning.nn.modules.base import AnalogLayerBase
-from aihwkit_lightning.nn.modules.torch_utils.torch_linear import TorchLinear
-from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig, WeightClipType
-from aihwkit_lightning.nn.modules.torch_utils.torch_abs_max import sliced_abs_max
+from .base import AnalogLayerBase
+from .torch_utils.torch_abs_max import sliced_abs_max
+from .torch_utils.torch_linear import TorchLinear
+from ...simulator.configs import TorchInferenceRPUConfig, WeightClipType
 
 
 def is_at_least_volta_gpu():
@@ -50,7 +51,7 @@ except ImportError:
     print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
 except RuntimeError as e:
     if str(e) != "0 active drivers ([]). There should only be one.":
-        raise RuntimeError(e)
+        raise RuntimeError(e) from e
 
 
 class _AnalogConvNd(AnalogLayerBase, _ConvNd):
@@ -195,7 +196,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         """
         return (self.weight, self.bias)
 
-    def forward(self, x_input: Tensor) -> Tensor:
+    def forward(self, inp: Tensor) -> Tensor:
         """Compute the forward pass."""
 
         modified_weights = self.weight
@@ -215,11 +216,11 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 " you have for the weight matrix."
             )
 
-        im_shape = x_input.shape
+        im_shape = inp.shape
         assert isinstance(self.padding, tuple), "Padding must be a tuple"
-        x_input_ = (
+        inp_ = (
             unfold(
-                x_input,
+                inp,
                 kernel_size=self.kernel_size,
                 dilation=self.dilation,
                 padding=self.padding,
@@ -234,7 +235,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         if TRITON_AVAIL and triton_enabled:
             self.upper_end_of_slices = self.upper_end_of_slices.to(device=modified_weights.device)
             out = TritonLinear.apply(
-                x_input_,
+                inp_,
                 modified_weights,
                 self.input_range,
                 self.input_range_update_idx,
@@ -245,7 +246,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             out = out + self.bias if self.bias is not None else out
         else:
             out = TorchLinear.linear(
-                inp=x_input_,
+                inp=inp_,
                 weights=modified_weights,
                 bias=self.bias,
                 input_range=self.input_range,
@@ -343,9 +344,9 @@ class AnalogConv1d(_AnalogConvNd):
         self._register_state_dict_hook(self.return_pytorch_state_dict)
         self.tensor_view = (-1, 1)
 
-    def forward(self, x_input: Tensor) -> Tensor:
-        x_input_ = x_input.unsqueeze(-2)
-        y = super().forward(x_input_)
+    def forward(self, inp: Tensor) -> Tensor:
+        inp_ = inp.unsqueeze(-2)
+        y = super().forward(inp_)
         return y.squeeze(-2)
 
     @classmethod
@@ -573,7 +574,7 @@ class AnalogConv2d(_AnalogConvNd):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         # pylint: disable=protected-access
-        destination._metadata[prefix.split(".")[0]]["rpu_config"] = self.rpu_config
+        destination._metadata[prefix.split(".")[0]]["rpu_config"] = deepcopy(self.rpu_config)
 
     def _load_from_state_dict(
         self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
@@ -582,4 +583,4 @@ class AnalogConv2d(_AnalogConvNd):
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
         )
         if "rpu_config" in local_metadata:
-            self.rpu_config = local_metadata["rpu_config"]
+            self.rpu_config = deepcopy(local_metadata["rpu_config"])

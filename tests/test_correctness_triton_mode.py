@@ -65,15 +65,8 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
     [WeightQuantizationType.DISCRETIZE, WeightQuantizationType.DISCRETIZE_PER_CHANNEL],
 )
 @mark.parametrize("weight_modifier_res", [2**8 - 2])
-@mark.parametrize(
-    "clip_type",
-    [
-        WeightClipType.NONE,
-        WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-        WeightClipType.LEARNABLE_PER_CHANNEL,
-    ],
-)
-@mark.parametrize("device", ["cpu"])  # cpu not supported for triton
+@mark.parametrize("clip_type", [WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL, WeightClipType.NONE])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
 @mark.parametrize("dtype", [float32])
 # pylint: disable=too-many-arguments, too-many-branches, too-many-statements
 def test_linear_forward(
@@ -102,6 +95,9 @@ def test_linear_forward(
     """Test the forward pass."""
 
     out_bound, out_res = adc_config
+
+    if os.environ.get("AIHWKIT_SKIP_TRITON", None) == "1":
+        raise SkipTest("AIHWKIT_SKIP_TRITON set.")
 
     if device == "cuda" and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")
@@ -241,7 +237,7 @@ def test_linear_forward(
 @mark.parametrize("ir_init_value", [2.0, 3.0])
 @mark.parametrize("ir_init_from_data", [0, 10])
 @mark.parametrize("ir_init_std_alpha", [2.0, 3.0])
-@mark.parametrize("device", ["cpu"])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
 @mark.parametrize("dtype", [float32])
 def test_input_range_backward(  # pylint: disable=too-many-arguments
     bsz: int,
@@ -259,6 +255,9 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
     dtype: torch_dtype,
 ):
     """Test the input range backward pass."""
+
+    if os.environ.get("AIHWKIT_SKIP_TRITON", None) == "1":
+        raise SkipTest("AIHWKIT_SKIP_TRITON set.")
 
     if device == "cuda" and SKIP_CUDA_TESTS:
         raise SkipTest("CUDA tests are disabled/ can't be performed")

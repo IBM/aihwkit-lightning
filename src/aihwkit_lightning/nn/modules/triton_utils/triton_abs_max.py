@@ -14,11 +14,12 @@
 
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
-from torch import full, Tensor, float32, int32, tensor
+from torch import full, Tensor, float32, int32, tensor, cuda
+from .triton_utils import lightning_autotune, requires_blocksizes
 
 
 # fmt: off
-@triton.autotune(
+@lightning_autotune(
     # pylint: disable=line-too-long
     configs=[
         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
@@ -41,6 +42,7 @@ from torch import full, Tensor, float32, int32, tensor
     ],
     key=["n_cols", "n_rows"],
     reset_to_zero=["per_channel_amax_ptr"],
+    enable=cuda.is_available()
 )
 @triton.jit
 def sliced_fast_abs_max_kernel(  # pylint: disable=too-many-arguments
@@ -136,7 +138,7 @@ def sliced_fast_abs_max_kernel(  # pylint: disable=too-many-arguments
         lower_bound = upper_bound
 
 
-@triton.autotune(
+@lightning_autotune(
     # pylint: disable=line-too-long
     configs=[
         triton.Config({"BLOCK_SIZE_N_COLS": 32, "BLOCK_SIZE_N_ROWS": 32}, num_stages=3, num_warps=1),  # noqa: E501
@@ -158,6 +160,7 @@ def sliced_fast_abs_max_kernel(  # pylint: disable=too-many-arguments
     ],
     key=["n_cols", "n_rows"],
     reset_to_zero=["per_channel_amax_ptr"],
+    enable=cuda.is_available()
 )
 @triton.jit
 def fast_abs_max_kernel(
@@ -304,6 +307,7 @@ def sliced_fast_abs_max(weights: Tensor, upper_end_of_slices: Tensor):
             * triton.cdiv(n_rows, meta["BLOCK_SIZE_N_ROWS"]),
         )
 
+    block_args = (32, 32) if requires_blocksizes(sliced_fast_abs_max_kernel, grid) else tuple()
     sliced_fast_abs_max_kernel[grid](
         weights,
         upper_end_of_slices,
@@ -314,6 +318,7 @@ def sliced_fast_abs_max(weights: Tensor, upper_end_of_slices: Tensor):
         n_splits,
         n_cols,
         n_rows,
+        *block_args,
         # 32,
         # 32,
     )
