@@ -30,11 +30,25 @@ job_install_common: &job_install_common
     - sudo apt-get -qq install -y ca-certificates
     - sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
     - sudo apt-get update
+    - sudo apt install libopenblas-dev
   install:
     # Set the python executable, to force cmake picking the right one.
     - PYTHON_EXECUTABLE=~/virtualenv/python$TRAVIS_PYTHON_VERSION/bin/python$TRAVIS_PYTHON_VERSION
     - $PYTHON_EXECUTABLE -m pip install travis-wait-improved
-    - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install aihwkit
+    - $PYTHON_EXECUTABLE -m pip install scikit-build
+    - $PYTHON_EXECUTABLE -m pip install open-blas
+    
+    # Clone and install AIHWKIT from specific commit
+    - git clone https://github.com/IBM/aihwkit.git
+    - cd aihwkit
+    - git checkout feed1cfd5e00387076a04f08a8b60d77b15fd65d
+    - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install -r requirements.txt
+    - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install -r requirements-dev.txt
+    - travis-wait-improved --timeout 60m make build_inplace
+    - cd ..
+    - export PYTHONPATH=$HOME/aihwkit/src
+    
+    # Install your project requirements
     - travis-wait-improved --timeout 60m $PYTHON_EXECUTABLE -m pip install -r requirements.txt
     - $PYTHON_EXECUTABLE -m pip install -r requirements_dev.txt
     - $PYTHON_EXECUTABLE -m pip install types-tqdm
@@ -64,7 +78,7 @@ jobs:
     stage: Test
     python: "3.10"
     script:
-      - AIHWKIT_SKIP_TRITON=1 make pytest
+      - KMP_DUPLICATE_LIB_OK=TRUE AIHWKIT_SKIP_TRITON=1 make pytest
 
   - name: "Install, pycodestyle, lint, and mypy. Python 3.10"
     <<: *job_install_common
