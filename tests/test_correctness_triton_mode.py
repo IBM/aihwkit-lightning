@@ -34,7 +34,11 @@ from torch import (
 )
 from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
-from aihwkit_lightning.simulator.configs import WeightModifierType, WeightClipType
+from aihwkit_lightning.simulator.configs import (
+    WeightNoiseInjectionType,
+    WeightQuantizationType,
+    WeightClipType,
+)
 
 
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
@@ -55,7 +59,11 @@ SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
 @mark.parametrize("adc_config", [(10, 2**8 - 2), (10, 1 / (2**8 - 2))])
 @mark.parametrize("out_noise", [False])
 @mark.parametrize("out_noise_per_channel", [False])
-@mark.parametrize("weight_modifier", [WeightModifierType.NONE])
+@mark.parametrize("noise_type", [WeightNoiseInjectionType.NONE])
+@mark.parametrize(
+    "quantization_type",
+    [WeightQuantizationType.DISCRETIZE, WeightQuantizationType.DISCRETIZE_PER_CHANNEL],
+)
 @mark.parametrize("weight_modifier_res", [2**8 - 2])
 @mark.parametrize("clip_type", [WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL, WeightClipType.NONE])
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
@@ -77,7 +85,8 @@ def test_linear_forward(
     adc_config: Tuple[float, float],
     out_noise: bool,
     out_noise_per_channel: bool,
-    weight_modifier: WeightModifierType,
+    noise_type: WeightNoiseInjectionType,
+    quantization_type: WeightQuantizationType,
     weight_modifier_res: int,
     clip_type: WeightClipType,
     device: torch_device,
@@ -102,7 +111,7 @@ def test_linear_forward(
     if dtype == bfloat16:
         raise SkipTest("Bfloat16 currently not supported for triton")
 
-    if out_noise and weight_modifier != WeightModifierType.NONE:
+    if out_noise and noise_type != WeightNoiseInjectionType.NONE:
         raise SkipTest("Output noise and non-None weight modifier skipped")
 
     if not ir_enable and not adc_config == (-1, -1):
@@ -121,7 +130,8 @@ def test_linear_forward(
     manual_seed(0)
 
     def populate_rpu(rpu_config: RPUConfig):
-        rpu_config.modifier.type = weight_modifier
+        rpu_config.modifier.noise_type = noise_type
+        rpu_config.modifier.quantization_type = quantization_type
         rpu_config.modifier.std_dev = 0.03
         rpu_config.modifier.res = weight_modifier_res
         rpu_config.forward.inp_res = inp_res
@@ -141,19 +151,21 @@ def test_linear_forward(
 
     rpu = populate_rpu(RPUConfig())
     linear = AnalogLinear(in_features=inp_size, out_features=out_size, bias=bias, rpu_config=rpu)
+    if clip_type == WeightClipType.LEARNABLE_PER_CHANNEL:
+        # make sure there is/would be clipping. makes test harder
+        linear.learnable_weight_clip.data *= 0.9
+        if rpu.modifier.quantization_type == WeightQuantizationType.DISCRETIZE:
+            raise SkipTest("Discretize per tensor but learn ranges per column.")
+
     # if out noise is to be tested, we don't want to be in eval mode
     if out_noise:
         assert (
-            weight_modifier == WeightModifierType.NONE
+            noise_type == WeightNoiseInjectionType.NONE
         ), "Found out_noise and non-None weight modifier"
-    elif weight_modifier != WeightModifierType.NONE:
-        assert weight_modifier in [
-            WeightModifierType.ADD_NORMAL,
-            WeightModifierType.ADD_NORMAL_PER_CHANNEL,
-            WeightModifierType.DISCRETIZE,
-            WeightModifierType.DISCRETIZE_PER_CHANNEL,
-            WeightModifierType.DISCRETIZE_ADD_NORMAL,
-            WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+    elif noise_type != WeightNoiseInjectionType.NONE:
+        assert noise_type in [
+            WeightNoiseInjectionType.ADD_NORMAL,
+            WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL,
         ], "Unkown weight modifier"
     else:
         linear = linear.eval()
@@ -183,11 +195,7 @@ def test_linear_forward(
         delta_triton = out_triton - out_noise_free
         delta_torch = out - out_noise_free
         assert allclose(delta_torch.std(), delta_triton.std(), atol=1e-2)
-    elif weight_modifier not in [
-        WeightModifierType.NONE,
-        WeightModifierType.DISCRETIZE,
-        WeightModifierType.DISCRETIZE_PER_CHANNEL,
-    ]:
+    elif noise_type != WeightNoiseInjectionType.NONE:
         linear.rpu_config.modifier.std_dev = 0.0
         out_noise_free = linear(inp)  # pylint: disable=not-callable
         linear.rpu_config.modifier.std_dev = 0.03
@@ -338,7 +346,7 @@ if __name__ == "__main__":
     test_linear_forward(
         bsz=10,
         num_inp_dims=2,
-        inp_size=10,
+        inp_size=30,
         out_size=20,
         bias=True,
         inp_res=254,
@@ -351,9 +359,10 @@ if __name__ == "__main__":
         adc_config=(10, 2**8 - 2),
         out_noise=False,
         out_noise_per_channel=False,
-        weight_modifier=WeightModifierType.NONE,
+        noise_type=WeightNoiseInjectionType.NONE,
+        quantization_type=WeightQuantizationType.NONE,
         weight_modifier_res=254,
-        clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-        device="cuda",
+        clip_type=WeightClipType.LEARNABLE_PER_CHANNEL,
+        device="cpu",
         dtype=float32,
     )

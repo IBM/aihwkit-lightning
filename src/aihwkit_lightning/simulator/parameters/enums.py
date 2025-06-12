@@ -17,17 +17,11 @@
 from enum import Enum
 
 
-class WeightModifierType(Enum):
+class WeightNoiseInjectionType(Enum):
     """Weight modifier type."""
 
     NONE = "None"
     """No weight modifier. Nothing happens to the weight. """
-
-    DISCRETIZE = "Discretize"
-    """Quantize the weights."""
-
-    DISCRETIZE_PER_CHANNEL = "DiscretizePerChannel"
-    """Quantize the weights per channel."""
 
     ADD_NORMAL = "AddNormal"
     """Additive Gaussian noise."""
@@ -35,11 +29,18 @@ class WeightModifierType(Enum):
     ADD_NORMAL_PER_CHANNEL = "AddNormalPerChannel"
     """Additive Gaussian noise per channel."""
 
-    DISCRETIZE_ADD_NORMAL = "DiscretizeAddNormal"
-    """First discretize and then additive Gaussian noise."""
 
-    DISCRETIZE_ADD_NORMAL_PER_CHANNEL = "DiscretizeAddNormalPerChannel"
-    """First discretize per channel and then additive Gaussian noise per channel."""
+class WeightQuantizationType(Enum):
+    """Weight quantization type."""
+
+    NONE = "None"
+    """No weight quantizer. Nothing happens to the weight. """
+
+    DISCRETIZE = "Discretize"
+    """Quantize the weights."""
+
+    DISCRETIZE_PER_CHANNEL = "DiscretizePerChannel"
+    """Quantize the weights per channel."""
 
 
 class WeightClipType(Enum):
@@ -55,3 +56,8 @@ class WeightClipType(Enum):
     LAYER_GAUSSIAN_PER_CHANNEL = "LayerGaussianPerChannel"
     """Calculates the second moment of the whole weight matrix per output column and clips
     at ``sigma`` times the result symmetrically around zero."""
+
+    LEARNABLE_PER_CHANNEL = "LearnablePerChannel"
+    """Implements ParetoQ-like learnable weight clipping (originally LSQ)
+    see eq. 3 from https://arxiv.org/pdf/1902.08153. Implements this on a
+    per-channel basis."""

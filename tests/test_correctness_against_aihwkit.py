@@ -59,7 +59,11 @@ from aihwkit_lightning.nn.modules.rnn.cells import (
 )
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.optim import AnalogOptimizer
-from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
+from aihwkit_lightning.simulator.configs import (
+    WeightNoiseInjectionType,
+    WeightQuantizationType,
+    WeightClipType,
+)
 
 
 SKIP_CUDA_TESTS = os.getenv("SKIP_CUDA_TESTS") or not torch_cuda.is_available()
@@ -687,26 +691,36 @@ def test_backward(
 @mark.parametrize(
     "modifier_type",
     [
-        WeightModifierType.DISCRETIZE,
-        WeightModifierType.NONE,
-        WeightModifierType.ADD_NORMAL,
-        WeightModifierType.ADD_NORMAL_PER_CHANNEL,
-        WeightModifierType.DISCRETIZE_ADD_NORMAL,
+        WeightNoiseInjectionType.NONE,
+        WeightNoiseInjectionType.ADD_NORMAL,
+        WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL,
+    ],
+)
+@mark.parametrize(
+    "quantization_type",
+    [
+        WeightQuantizationType.NONE,
+        WeightQuantizationType.DISCRETIZE,
+        WeightQuantizationType.DISCRETIZE_PER_CHANNEL,
     ],
 )
 @mark.parametrize("res", [2**5 - 2, 1 / (2**5 - 2)])
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
 def test_weight_modifier(
-    modifier_type: WeightModifierType, res: float, device: str, dtype: torch_dtype
+    modifier_type: WeightNoiseInjectionType,
+    quantization_type: WeightQuantizationType,
+    res: float,
+    device: str,
+    dtype: torch_dtype,
 ):
     """Test the weight modifier."""
 
-    if res > 0 and modifier_type not in [
-        WeightModifierType.DISCRETIZE,
-        WeightModifierType.DISCRETIZE_ADD_NORMAL,
+    if res > 0 and quantization_type not in [
+        WeightQuantizationType.DISCRETIZE,
+        WeightQuantizationType.DISCRETIZE_PER_CHANNEL,
     ]:
-        raise SkipTest("res but modifier is not discretize")
+        raise SkipTest("res but quantizer is not discretize")
 
     if device == "cpu" and dtype != float32:
         raise SkipTest("Skipping non-float32 tests for CPU")
@@ -714,7 +728,8 @@ def test_weight_modifier(
     manual_seed(0)
     in_size = 10
     rpu_config = RPUConfig()
-    rpu_config.modifier.type = modifier_type
+    rpu_config.modifier.noise_type = modifier_type
+    rpu_config.modifier.quantization_type = quantization_type
     rpu_config.modifier.res = res
     rpu_config.modifier.std_dev = 0.05
 
@@ -728,12 +743,14 @@ def test_weight_modifier(
     manual_seed(0)
     out = model(inp)  # pylint: disable=not-callable
 
-    assumed_wmax = (
-        weights.abs().amax(dim=1, keepdim=True)
-        if modifier_type == WeightModifierType.ADD_NORMAL_PER_CHANNEL
-        else weights.abs().max()
-    )
-    if modifier_type in [WeightModifierType.DISCRETIZE, WeightModifierType.DISCRETIZE_ADD_NORMAL]:
+    if quantization_type in [
+        WeightQuantizationType.DISCRETIZE,
+        WeightQuantizationType.DISCRETIZE_PER_CHANNEL,
+    ]:
+        if quantization_type == WeightQuantizationType.DISCRETIZE_PER_CHANNEL:
+            assumed_wmax = weights.abs().amax(dim=1, keepdim=True)
+        else:
+            assumed_wmax = weights.abs().max()
         res = rpu_config.modifier.res
         n_states = res / 2 if res > 1.0 else 1 / (2 * res)
         res = (1 / n_states) * assumed_wmax
@@ -744,10 +761,13 @@ def test_weight_modifier(
 
     manual_seed(0)
     if modifier_type in [
-        WeightModifierType.ADD_NORMAL,
-        WeightModifierType.ADD_NORMAL_PER_CHANNEL,
-        WeightModifierType.DISCRETIZE_ADD_NORMAL,
+        WeightNoiseInjectionType.ADD_NORMAL,
+        WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL,
     ]:
+        if modifier_type == WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL:
+            assumed_wmax = weights.abs().amax(dim=1, keepdim=True)
+        else:
+            assumed_wmax = weights.abs().max()
         noise = (
             rpu_config.modifier.std_dev
             * assumed_wmax
@@ -782,7 +802,7 @@ def test_weight_modifier_gradient(
             rpu_config.forward.is_perfect = True
             rpu_config.modifier.type = AIHWKITWeightModifierType.ADD_NORMAL
         else:
-            rpu_config.modifier.type = WeightModifierType.ADD_NORMAL
+            rpu_config.modifier.noise_type = WeightNoiseInjectionType.ADD_NORMAL
 
         rpu_config.modifier.std_dev = 0.05
         rpu_config.modifier.enable_during_test = enable_during_test
@@ -895,18 +915,18 @@ def test_output_noise(is_test: bool, out_noise_per_channel: bool, device: str, d
 
 if __name__ == "__main__":
     test_rpus = fixture_rpus(
-        max_inp_size=256,
+        max_inp_size=9,
         ir_enable_inp_res=(True, 254),
         ir_dynamic=True,
         ir_learn_input_range=True,
-        ir_init_value=3.0,
-        ir_init_from_data=10,
+        ir_init_value=2.0,
+        ir_init_from_data=-1,
         ir_init_std_alpha=2.0,
-        adc_config=(-1, -1),
+        adc_config=(10, 254),
     )
     # test_conv2d_forward(
     #     bsz=1,
-    #     num_inp_dims=1,
+    #     num_inp_dims=2,
     #     height=10,
     #     width=10,
     #     in_channels=3,
@@ -917,27 +937,30 @@ if __name__ == "__main__":
     #     dilation=(1, 1),
     #     groups=1,
     #     bias=True,
-    #     device=torch_device("cuda"),
+    #     device=torch_device("cpu"),
     #     dtype=float32,
     #     rpus=test_rpus,
     # )
-    test_backward(
-        bsz=1,
-        num_inp_dims=2,
-        inp_size=32,
-        out_size=32,
-        bias=False,
-        device=torch_device("cpu"),
-        dtype=float32,
-        rpus=test_rpus,
-    )
-    # test_linear_forward(
+    # test_backward(
     #     bsz=1,
-    #     num_inp_dims=1,
-    #     inp_size=64,
-    #     out_size=64,
+    #     num_inp_dims=2,
+    #     inp_size=32,
+    #     out_size=32,
+    #     bias=False,
+    #     device=torch_device("cpu"),
+    #     dtype=float32,
+    #     rpus=test_rpus,
+    # )
+    # test_linear_forward(
+    #     bsz=3,
+    #     num_inp_dims=2,
+    #     inp_size=10,
+    #     out_size=10,
     #     bias=True,
     #     device=torch_device("cpu"),
     #     dtype=float32,
     #     rpus=test_rpus,
     # )
+    test_output_noise(
+        is_test=False, out_noise_per_channel=False, device=torch_device("cpu"), dtype=float32
+    )

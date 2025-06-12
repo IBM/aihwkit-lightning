@@ -38,7 +38,7 @@ from aihwkit.optim.analog_optimizer import AnalogOptimizerMixin
 
 from aihwkit_lightning.nn import AnalogLinear
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
-from aihwkit_lightning.simulator.configs import WeightModifierType, WeightClipType
+from aihwkit_lightning.simulator.configs import WeightNoiseInjectionType, WeightClipType
 from aihwkit_lightning.optim import AnalogOptimizer
 
 
@@ -168,7 +168,7 @@ def gen_rpu(
             rpu_config.forward.bound_management = BoundManagementType.NONE
             rpu_config.remap.type = WeightRemapType.LAYERWISE_SYMMETRIC
 
-            rpu_config.modifier.type = (
+            rpu_config.modifier.noise_type = (
                 AIHWKITWeightModifierType.ADD_NORMAL
                 if weight_noise_enable
                 else AIHWKITWeightModifierType.NONE
@@ -177,8 +177,10 @@ def gen_rpu(
                 AIHWKITWeightClipType.LAYER_GAUSSIAN if clip_enable else AIHWKITWeightClipType.NONE
             )
         else:
-            rpu_config.modifier.type = (
-                WeightModifierType.ADD_NORMAL if weight_noise_enable else WeightModifierType.NONE
+            rpu_config.modifier.noise_type = (
+                WeightNoiseInjectionType.ADD_NORMAL
+                if weight_noise_enable
+                else WeightNoiseInjectionType.NONE
             )
             rpu_config.clip.type = (
                 WeightClipType.LAYER_GAUSSIAN if clip_enable else WeightClipType.NONE

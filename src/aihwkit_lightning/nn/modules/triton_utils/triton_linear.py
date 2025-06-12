@@ -21,7 +21,12 @@ from torch import Tensor, cuda, empty, float32, randint, zeros_like, clamp
 from .triton_utils import lightning_autotune, requires_blocksizes
 from .triton_abs_max import sliced_fast_abs_max
 from .triton_std import sliced_fast_std
-from ....simulator.configs import TorchInferenceRPUConfig, WeightClipType
+from ....simulator.configs import (
+    TorchInferenceRPUConfig,
+    WeightNoiseInjectionType,
+    WeightQuantizationType,
+    WeightClipType,
+)
 
 
 FLOAT32_TINY: tl.constexpr = 1.1754943508222875e-38
@@ -61,10 +66,13 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
     stride_assumed_wmax_num_slices,
     stride_assumed_wmax_out_size,
     # miscellaneous
-    modifier_type: tl.constexpr,  # str
+    noise_type: tl.constexpr,  # str
+    quantization_type: tl.constexpr,  # str
+    clip_type: tl.constexpr,  # str
     modifier_weight_res: tl.constexpr,  # float
     modifier_seed,  # int
     modifier_std: tl.constexpr,  # float
+    is_fp: tl.constexpr,
     # block sizes
     BLOCK_SIZE_HIDDEN: tl.constexpr,  # pylint: disable=invalid-name
     BLOCK_SIZE_OUT: tl.constexpr,  # pylint: disable=invalid-name
@@ -94,9 +102,7 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
             + offs_bn * stride_assumed_wmax_out_size
         )
         # pylint: disable=consider-using-in
-        if modifier_type == "AddNormal" or (
-            modifier_type == "Discretize" or modifier_type == "DiscretizeAddNormal"
-        ):
+        if noise_type == "AddNormal" or quantization_type == "Discretize":
             assumed_wmax_per_slice = tl.load(reduced_assumed_wmax_ptr + slice_idx)
         else:
             assumed_wmax_per_slice = tl.load(
@@ -119,22 +125,24 @@ def modifier_kernel(  # pylint: disable=too-many-arguments
             weight_block = tl.load(b_ptrs, mask=offs_k[:, None] < current_upper, other=0.0)
 
             # pylint: disable=consider-using-in
-            if (modifier_type == "Discretize" or modifier_type == "DiscretizeAddNormal") or (
-                modifier_type == "DiscretizePerChannel"
-                or modifier_type == "DiscretizeAddNormalPerChannel"
+            if (
+                clip_type == "LearnablePerChannel"
+                or (
+                    quantization_type == "Discretize"
+                    or quantization_type == "DiscretizePerChannel"
+                )
             ):
                 if modifier_weight_res > 0:
                     n_states = max(modifier_weight_res, 1 / modifier_weight_res)
                     res = 2 * assumed_wmax_per_slice / n_states
                     weight_block = weight_block / res
-                    weight_block = tl.extra.cuda.libdevice.rint(weight_block)
+                    weight_block = tl.clamp(weight_block, -n_states / 2, n_states / 2)
+                    if not is_fp:
+                        weight_block = tl.extra.cuda.libdevice.rint(weight_block)
                     weight_block = weight_block * res
 
             # pylint: disable=consider-using-in
-            if (modifier_type == "AddNormal" or modifier_type == "AddNormalPerChannel") or (
-                modifier_type == "DiscretizeAddNormal"
-                or modifier_type == "DiscretizeAddNormalPerChannel"
-            ):
+            if noise_type == "AddNormal" or noise_type == "AddNormalPerChannel":
                 randn_block = tl.randn(modifier_seed + pid, weight_random_offsets)
                 weight_random_offsets += increase_weight_offsets_by
                 randn_block = assumed_wmax_per_slice * modifier_std * randn_block
@@ -441,10 +449,10 @@ class TritonLinear(Function):
         weights: Tensor,
         input_range: Tensor | None,
         input_range_update_idx: Tensor | None,
+        learnable_weight_clip: Tensor | None,
         upper_end_of_slices: Tensor,
         rpu_config: TorchInferenceRPUConfig,
         training: bool,
-        apply_weight_modifier: bool,
     ) -> Tensor:
         """
         Forward of the triton-based linear layer
@@ -456,11 +464,11 @@ class TritonLinear(Function):
             input_range: Tensor of input range(s)
             input_range_update_idx: How often did every input range
                 get updated by data already?
+            learnable_weight_clip: Tensor storing per-slice per-column learned ranges
             upper_end_of_slices: [128, 256] if a 256-sized layer is
                 split by 128-sized chunks
             rpu_config: The configuration for HW-aware training
             training: Are we in training or eval mode
-            apply_weight_modifier: Do we need to call the weight modifier kernel or not
 
         Returns:
             Gradients w.r.t. inputs, weights and input ranges.
@@ -520,11 +528,33 @@ class TritonLinear(Function):
         def weight_modifier_grid(meta):
             return (triton.cdiv(out_size, meta["BLOCK_SIZE_OUT"]),)
 
-        if apply_weight_modifier:
+        # for some tests, we skip rounding
+        skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
+        skip_rounding = skip_rounding == "1"
+
+        if (
+            (training and rpu_config.modifier.noise_type != WeightNoiseInjectionType.NONE)
+            or rpu_config.modifier.quantization_type != WeightQuantizationType.NONE
+            or rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL
+        ):
             modifier_std = rpu_config.modifier.std_dev
             modifier_seed = randint(2**31, (1,)).item()
             # bring the weight resolution into a state that we can interpret
             modifier_weight_res = rpu_config.modifier.res
+
+            if rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
+                assert rpu_config.modifier.quantization_type in [
+                    WeightQuantizationType.NONE,
+                    WeightQuantizationType.DISCRETIZE_PER_CHANNEL,
+                ], "You can't learn weight ranges per column but quantize per tensor"
+                assert learnable_weight_clip is not None, "learnable_weight_clip must be tensor"
+                assumed_wmax = learnable_weight_clip
+                reduced_assumed_wmax = learnable_weight_clip.sum(dim=-1, keepdim=True)
+                if (
+                    modifier_weight_res <= 0
+                    or rpu_config.modifier.quantization_type == WeightQuantizationType.NONE
+                ):
+                    modifier_weight_res = 2  # from -1 to 1
 
             block_args = (32, 32) if modifier_kernel[weight_modifier_grid] else tuple()
             modifier_kernel[weight_modifier_grid](
@@ -543,10 +573,13 @@ class TritonLinear(Function):
                 assumed_wmax.stride(0),
                 assumed_wmax.stride(1),
                 # miscellaneous
-                rpu_config.modifier.type.value,
+                rpu_config.modifier.noise_type.value,
+                rpu_config.modifier.quantization_type.value,
+                rpu_config.clip.type.value,
                 modifier_weight_res,
                 modifier_seed,
                 modifier_std,
+                skip_rounding,
                 # block sizes
                 *block_args,
             )
@@ -593,10 +626,6 @@ class TritonLinear(Function):
             expanded_input_range = sliced_fast_abs_max(inp, upper_end_of_slices=upper_end_of_slices)
         else:
             expanded_input_range = input_range.unsqueeze(1).repeat(num_slices, inp.size(0))
-
-        # for some tests, we skip rounding
-        skip_rounding = os.environ.get("_AIHWKIT_NO_ROUNDING", False)
-        skip_rounding = skip_rounding == "1"
 
         dtype = tl.float32 if inp.dtype == float32 else tl.float16
 
@@ -726,7 +755,7 @@ class TritonLinear(Function):
             ir_grad *= input_range
             did_clamp_mask = upper_thresh | lower_thresh
             if decay > 0:
-                # - We shrink the input range if less than X% of the inputs are clipping.
+                # We shrink the input range if less than X% of the inputs are clipping.
                 # where X is 1-ir_params.input_min_percentage
                 percentage = 1.0 - (did_clamp_mask).sum().div(upper_thresh.numel())
                 ir_grad += decay * input_range * (percentage > input_min_percentage)

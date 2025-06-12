@@ -24,12 +24,9 @@ from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d
 from torch.nn.modules.utils import _single, _pair
 
 from .base import AnalogLayerBase
+from .torch_utils.torch_abs_max import sliced_abs_max
 from .torch_utils.torch_linear import TorchLinear
-from ...simulator.configs import (
-    TorchInferenceRPUConfig,
-    WeightClipType,
-    WeightModifierType,
-)
+from ...simulator.configs import TorchInferenceRPUConfig, WeightClipType
 
 
 def is_at_least_volta_gpu():
@@ -52,6 +49,9 @@ try:
     TRITON_AVAIL = True
 except ImportError:
     print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
+except RuntimeError as e:
+    if str(e) != "0 active drivers ([]). There should only be one.":
+        raise RuntimeError(e) from e
 
 
 class _AnalogConvNd(AnalogLayerBase, _ConvNd):
@@ -115,6 +115,15 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         self.init_ir(
             init_value_ir=self.rpu_config.pre_post.input_range.init_value,
             init_value_counter=0,
+            device=device,
+            dtype=dtype,
+        )
+
+        self.init_learnable_weight_ranges(
+            init_value=sliced_abs_max(
+                upper_end_of_slices=self.upper_end_of_slices,
+                weights=self.weight.view(self.out_channels, -1),
+            ),
             device=device,
             dtype=dtype,
         )
@@ -191,17 +200,21 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         """Compute the forward pass."""
 
         modified_weights = self.weight
-        apply_weight_modifier = (
-            self.training or self.rpu_config.modifier.enable_during_test
-        ) and self.rpu_config.modifier.type != WeightModifierType.NONE
-        if apply_weight_modifier:
-            modified_weights = self.weight.clone()
 
         apply_out_quantization = self.rpu_config.forward.out_res > 0
         if apply_out_quantization:
             assert self.rpu_config.forward.out_bound > 0, "Out quant. without a bound."
             assert self.rpu_config.pre_post.input_range.enable, "Out quant. without IR."
         # apply_out_quantization entails out_bound > 0
+
+        if self.rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
+            assert (
+                self.learnable_weight_clip is not None
+            ), "Learnable weight clipping tensor not initialized."
+            assert self.learnable_weight_clip.size(0) == len(self.upper_end_of_slices), (
+                "Learnable weight clipping tensor must have the same number of rows as slices"
+                " you have for the weight matrix."
+            )
 
         im_shape = inp.shape
         assert isinstance(self.padding, tuple), "Padding must be a tuple"
@@ -229,7 +242,6 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 self.upper_end_of_slices,
                 self.rpu_config,
                 self.training,
-                apply_weight_modifier,
             )
             out = out + self.bias if self.bias is not None else out
         else:
@@ -241,10 +253,10 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 input_range_update_idx=self.input_range_update_idx,
                 x_min=self.x_min,
                 x_max=self.x_max,
+                learnable_weight_clip=self.learnable_weight_clip,
                 in_sizes=self.in_sizes,
                 training=self.training,
                 rpu_config=self.rpu_config,
-                apply_weight_modifier=apply_weight_modifier,
                 apply_out_quantization=apply_out_quantization,
             )
 
@@ -547,7 +559,7 @@ class AnalogConv2d(_AnalogConvNd):
         clip_type = self.rpu_config.clip.type
         clip_sigma = self.rpu_config.clip.sigma
 
-        if clip_type == WeightClipType.NONE:
+        if clip_type in [WeightClipType.NONE, WeightClipType.LEARNABLE_PER_CHANNEL]:
             return
         assert clip_sigma > 0, "Clip sigma must be greater than 0"
         sigma_std = clip_sigma * two_dim_weights.std(

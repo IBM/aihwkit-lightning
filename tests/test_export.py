@@ -28,7 +28,7 @@ from torch import arange, allclose, randn, manual_seed, float32, float16, bfloat
 from torch.nn import Linear, Conv2d, Module, Sequential
 
 from aihwkit_lightning.nn.conversion import convert_to_analog
-from aihwkit_lightning.simulator.configs import WeightClipType, WeightModifierType
+from aihwkit_lightning.simulator.configs import WeightClipType, WeightNoiseInjectionType
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig as RPUConfig
 from aihwkit_lightning.nn.export import export_to_aihwkit
 from aihwkit_lightning.nn import AnalogLinear
@@ -91,7 +91,7 @@ def fixture_clip_type(request) -> WeightClipType:
 
 
 @fixture(scope="module", name="weight_modifier_type")
-def fixture_weight_modifier_type(request) -> WeightModifierType:
+def fixture_weight_modifier_type(request) -> WeightNoiseInjectionType:
     """Weight modifier type parameter"""
     return request.param
 
@@ -114,7 +114,7 @@ def fixture_rpu(
     ir_init_std_alpha: float,
     adc_config: Tuple[float, float],
     clip_type: WeightClipType,
-    weight_modifier_type: WeightModifierType,
+    weight_modifier_type: WeightNoiseInjectionType,
 ) -> RPUConfig:
     """Fixture for initializing rpu globally for all tests that need them"""
     ir_enable, inp_res = ir_enable_inp_res
@@ -124,7 +124,7 @@ def fixture_rpu(
     rpu_config.clip.type = clip_type
     rpu_config.clip.sigma = 2.0
 
-    rpu_config.modifier.type = weight_modifier_type
+    rpu_config.modifier.noise_type = weight_modifier_type
     rpu_config.modifier.std_dev = 0.0
 
     rpu_config.forward.inp_res = inp_res
@@ -164,7 +164,7 @@ def fixture_rpu(
     ids=str,
     indirect=True,
 )
-@mark.parametrize("weight_modifier_type", [WeightModifierType.NONE], ids=str, indirect=True)
+@mark.parametrize("weight_modifier_type", [WeightNoiseInjectionType.NONE], ids=str, indirect=True)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
 @mark.parametrize("dtype", [float32], ids=str)
 def test_linear_forward(
@@ -244,16 +244,16 @@ def test_linear_forward(
 
 if __name__ == "__main__":
     test_rpu = fixture_rpu(
-        max_inp_size=5,
+        max_inp_size=10,
         ir_enable_inp_res=(True, 254),
         ir_learn_input_range=True,
-        ir_dynamic=True,
+        ir_dynamic=False,
         ir_init_value=3.0,
         ir_init_from_data=10,
         ir_init_std_alpha=3.0,
-        adc_config=(-1, -1),
+        adc_config=(10, 254),
         clip_type=WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL,
-        weight_modifier_type=WeightModifierType.NONE,
+        weight_modifier_type=WeightNoiseInjectionType.NONE,
     )
 
     test_linear_forward(
