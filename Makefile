@@ -19,10 +19,10 @@ pycodestyle:
 	pycodestyle src/ tests/
 
 pylint:
-	git ls-files | grep -E ".*\.py$$" | grep -v "pb2\.py$$" | xargs  pylint -rn
+	git ls-files | grep "\.py$$" | xargs  pylint -rn
 
 pytest:
-	pytest -v -s tests/
+	TRITON_INTERPRET=1 TRITON_CPU_BACKEND=1 pytest -v -s tests/
 
 black:
 	git ls-files | grep \.py$$ | xargs black -t py310 -C --config .black
