@@ -4,7 +4,7 @@
 
 # AIHWKIT-Lightning ⚡
 [![Documentation Status](https://readthedocs.org/projects/aihwkit_lightning/badge/?version=latest)](https://aihwkit_lightning.readthedocs.io/en/latest/?badge=latest)
-[![Build Status](https://app.travis-ci.com/IBM/aihwkit-lightning.svg?token=nYQJ7muZkSyoDYxxh5yc&branch=main)](https://travis-ci.com/IBM/aihwkit-lightning)
+[![Formatting and tests](https://github.com/IBM/aihwkit-lightning/actions/workflows/commit_check.yml/badge.svg)](https://github.com/IBM/aihwkit-lightning/actions/workflows/commit_check.yml)
 
 ## What is AIHWKIT-Lightning?
 **A fast and scalable toolkit for hardware-aware training of large neural networks on Analog In-Memory Computing (AIMC) hardware.**
