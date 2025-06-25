@@ -15,9 +15,11 @@ from typing import Optional, Tuple, List
 import os
 from copy import deepcopy
 from logging import warning
-from torch import Tensor, cuda, tensor, int32
+from torch import Tensor, cuda, no_grad, tensor, int32
 from torch.nn import Linear
+
 from .base import AnalogLayerBase
+from .torch_utils.quant_utils import clip_and_quantize
 from .torch_utils.torch_abs_max import sliced_abs_max
 from .torch_utils.torch_linear import TorchLinear
 from ...simulator.configs import TorchInferenceRPUConfig, WeightClipType
@@ -277,6 +279,26 @@ class AnalogLinear(Linear, AnalogLayerBase):
             self.weight.data.clamp_(-sigma_std, sigma_std)
         else:
             raise ValueError(f"Unknown clip type {clip_type}")
+
+    @no_grad()
+    def quantize_weights(self) -> None:
+        """Quantize the weights."""
+        current_upper = 0
+        for slice_idx, inp_size in enumerate(self.in_sizes):
+            modified_slice = self.weight[:, current_upper : current_upper + inp_size]
+            modified_slice = clip_and_quantize(
+                inp_weight=modified_slice,
+                assumed_wmax=None,
+                learnable_weight_clip=(
+                    None
+                    if self.learnable_weight_clip is None
+                    else self.learnable_weight_clip[slice_idx].unsqueeze(-1)
+                ),
+                rpu_config=self.rpu_config,
+            )
+            self.weight[:, current_upper : current_upper + inp_size] = modified_slice
+            current_upper += inp_size
+        super().quantize_weights()
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)

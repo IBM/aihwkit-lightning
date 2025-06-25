@@ -23,7 +23,7 @@ from aihwkit_lightning.simulator.configs import (
     WeightClipType,
 )
 from aihwkit_lightning.exceptions import ConfigError
-from .quant_utils import UniformQuantize
+from .quant_utils import UniformQuantize, clip_and_quantize
 
 
 class StraightThroughClamp(Function):
@@ -221,16 +221,17 @@ class TorchLinear:
             else:
                 assumed_wmax = None
 
-            modified_slice = TorchLinear.clip_and_quantize(
-                inp_weight=modified_slice,
-                assumed_wmax=assumed_wmax,
-                learnable_weight_clip=(
-                    None
-                    if learnable_weight_clip is None
-                    else learnable_weight_clip[slice_idx].unsqueeze(-1)
-                ),
-                rpu_config=rpu_config,
-            )
+            if training:
+                modified_slice = clip_and_quantize(
+                    inp_weight=modified_slice,
+                    assumed_wmax=assumed_wmax,
+                    learnable_weight_clip=(
+                        None
+                        if learnable_weight_clip is None
+                        else learnable_weight_clip[slice_idx].unsqueeze(-1)
+                    ),
+                    rpu_config=rpu_config,
+                )
             if rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
                 assert rpu_config.modifier.quantization_type in [
                     WeightQuantizationType.NONE,
@@ -460,92 +461,3 @@ class TorchLinear:
         modified_weight = modified_weight + noise
 
         return modified_weight
-
-    @staticmethod
-    def clip_and_quantize(
-        inp_weight: Tensor,
-        assumed_wmax: Union[Tensor, None],
-        learnable_weight_clip: Union[Tensor, None],
-        rpu_config: TorchInferenceRPUConfig,
-    ) -> Tensor:
-        """
-        Applies learned weight clipping ranges. This is only done if the weight modifier
-        is not one of the quantization weight modifiers.
-
-        Args:
-            inp_weight: Input weights.
-            assumed_wmax: Assumed maximum weight value.
-            learnable_weight_clip: The learnable per-column clipping values.
-            rpu_config: RPUConfig used.
-
-        Raises:
-            ConfigError: Unsupported/unknown weight modifier type.
-
-        Returns:
-            Clamped weights if clamping was applicable (not in place).
-        """
-        modifier = rpu_config.modifier
-
-        # 1, maybe clip
-        learnable_weight_clipping = rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL
-        if learnable_weight_clipping:
-            assert learnable_weight_clip is not None, "learnable_weight_clip should not be None"
-            assert learnable_weight_clip.shape == (
-                inp_weight.size(0),
-                1,
-            ), f"learnable_weight_clip.shape must be ({inp_weight.size(0)}, 1)"
-            if modifier.quantization_type == WeightQuantizationType.NONE:
-                # we pass the learned learnable_weight_clip
-                # we want to clip at -1 1 after "normalization"
-                # we want to skip rounding in this case
-                # we can do in place since we don't modify the weight
-                inp_weight = UniformQuantize.apply(
-                    inp_weight,
-                    learnable_weight_clip,
-                    0.5,
-                    False,
-                    learnable_weight_clipping,
-                    1.0,
-                    True,
-                )
-
-        # after we might have done clipping, return if we don't want to quantize
-        if modifier.quantization_type == WeightQuantizationType.NONE:
-            return inp_weight
-
-        # 2, if we're here, we definitely quantize
-        if assumed_wmax is None:
-            assumed_wmax = inp_weight.abs().amax(dim=1, keepdim=True)
-
-        if modifier.quantization_type in [
-            WeightQuantizationType.DISCRETIZE,
-            WeightQuantizationType.DISCRETIZE_PER_CHANNEL,
-        ]:
-            res = modifier.res
-            n_states = max(res, 1 / res)
-            max_quant_state = n_states / 2
-            if learnable_weight_clipping:
-                assert learnable_weight_clip is not None, "learnable_weight_clip should not be None"
-                scaling_factors = learnable_weight_clip / n_states  # type: ignore[assignment]
-            else:
-                if modifier.quantization_type == WeightQuantizationType.DISCRETIZE:
-                    scaling_factors = assumed_wmax.max() / n_states
-                else:
-                    scaling_factors = assumed_wmax / n_states  # type: ignore[assignment]
-
-            # Discretize the weights on the fly and backprob through them
-            inp_weight = UniformQuantize.apply(
-                inp_weight,
-                scaling_factors,
-                1.0,
-                False,
-                learnable_weight_clipping,
-                max_quant_state,
-                False,
-            )
-        else:
-            raise ConfigError(
-                f"modifier.quantization_type {modifier.quantization_type} not supported"
-            )
-
-        return inp_weight

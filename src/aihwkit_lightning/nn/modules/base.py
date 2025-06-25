@@ -17,7 +17,7 @@ from torch import device as torch_device
 from torch.nn import Parameter
 from torch import Tensor, empty, zeros
 from ...simulator.configs import TorchInferenceRPUConfig
-from ...simulator.parameters import WeightClipType
+from ...simulator.parameters import WeightClipType, WeightQuantizationType
 
 
 class AnalogLayerBase:
@@ -151,3 +151,7 @@ class AnalogLayerBase:
             self.input_range_update_idx = None
             self.x_min = None  # type: ignore
             self.x_max = None  # type: ignore
+
+    def quantize_weights(self) -> None:
+        """Quantize the weights in-place given the quantization type."""
+        self.rpu_config.modifier.quantization_type = WeightQuantizationType.NONE

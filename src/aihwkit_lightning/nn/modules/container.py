@@ -104,3 +104,8 @@ class AnalogWrapper(AnalogContainerBase):
         new_module = digital_class.__new__(digital_class)  # type: ignore
         new_module.__dict__ = module.__dict__
         return new_module
+
+    def quantize_weights(self):
+        """Iterate through analog layers in model and quantize weights in-place."""
+        for layer in self.analog_layers():
+            layer.quantize_weights()
