@@ -197,3 +197,9 @@ class AnalogLayerBase:
 
             self.rpu_config.modifier.noise_type = noise_type
             self.rpu_config.modifier.quantization_type = quantization_type
+
+    def quantize_weights(self) -> None:
+        """Quantize the weights in-place given the quantization type."""
+        warnings.warn("Modified the rpu_config because quantize_weights was called.")
+        self.rpu_config.modifier.quantization_type = WeightQuantizationType.NONE
+        self.rpu_config.clip.type = WeightClipType.NONE

@@ -18,12 +18,13 @@ from typing import Optional, Tuple, Union, List
 import os
 from copy import deepcopy
 from functools import reduce
-from torch import Tensor, cuda, tensor, int32
+from torch import Tensor, cuda, no_grad, tensor, int32
 from torch.nn.functional import unfold
 from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d
 from torch.nn.modules.utils import _single, _pair
 
 from .base import AnalogLayerBase
+from .torch_utils.quant_utils import clip_and_quantize
 from .torch_utils.torch_abs_max import sliced_abs_max
 from .torch_utils.torch_linear import TorchLinear
 from ...simulator.configs import TorchInferenceRPUConfig, WeightClipType
@@ -197,6 +198,29 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             tuple: weight matrix, bias vector
         """
         return (self.weight, self.bias)
+
+    @no_grad()
+    def quantize_weights(self) -> None:
+        """Quantize the weights."""
+        weight_2d = self.weight.view(self.out_channels, -1)
+        current_upper = 0
+        for slice_idx, inp_size in enumerate(self.in_sizes):
+            modified_slice = weight_2d[:, current_upper : current_upper + inp_size]
+            modified_slice = clip_and_quantize(
+                inp_weight=modified_slice,
+                assumed_wmax=None,
+                learnable_weight_clip=(
+                    None
+                    if self.learnable_weight_clip is None
+                    else self.learnable_weight_clip[slice_idx].unsqueeze(-1)
+                ),
+                rpu_config=self.rpu_config,
+            )
+            weight_2d[:, current_upper : current_upper + inp_size] = modified_slice
+            current_upper += inp_size
+
+        self.weight.data = weight_2d.view_as(self.weight)
+        super().quantize_weights()
 
     def forward(self, inp: Tensor) -> Tensor:
         """Compute the forward pass."""
