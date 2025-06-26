@@ -128,6 +128,8 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             dtype=dtype,
         )
 
+        self.deprecation_adjustment()
+
     def get_tile_size(self, in_channels: int, groups: int, kernel_size: Tuple[int, ...]) -> int:
         """Calculate the tile size."""
         return (in_channels // groups) * reduce(lambda x, y: x * y, kernel_size)

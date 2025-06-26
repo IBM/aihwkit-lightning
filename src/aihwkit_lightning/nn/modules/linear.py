@@ -92,6 +92,8 @@ class AnalogLinear(Linear, AnalogLayerBase):
             dtype=dtype,
         )
 
+        self.deprecation_adjustment()
+
     def forward(self, inp: Tensor) -> Tensor:  # pylint: disable=arguments-renamed
         """Forward function."""
 

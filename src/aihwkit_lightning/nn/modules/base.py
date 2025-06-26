@@ -11,13 +11,19 @@
 # that they have been altered from the originals.
 
 """Base class for adding functionality to analog layers."""
+import warnings
 from typing import Tuple, Generator, Callable, List, Any
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch.nn import Parameter
 from torch import Tensor, empty, zeros
 from ...simulator.configs import TorchInferenceRPUConfig
-from ...simulator.parameters import WeightClipType
+from ...simulator.parameters import (
+    WeightClipType,
+    WeightNoiseInjectionType,
+    WeightQuantizationType,
+    WeightModifierType,
+)
 
 
 class AnalogLayerBase:
@@ -151,3 +157,38 @@ class AnalogLayerBase:
             self.input_range_update_idx = None
             self.x_min = None  # type: ignore
             self.x_max = None  # type: ignore
+
+    def deprecation_adjustment(self) -> None:
+        modifier_type = self.rpu_config.modifier.type
+        if modifier_type != WeightModifierType.NONE:
+            warnings.warn(
+                "You are using the deprecated rpu_config.modifier.type. "
+                "This model was likely trained with AIHWKIT-Lightning version "
+                "<2."
+            )
+            noise_type = WeightNoiseInjectionType.NONE
+            quantization_type = WeightQuantizationType.NONE
+            if modifier_type in [
+                WeightModifierType.ADD_NORMAL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            ]:
+                noise_type = WeightNoiseInjectionType.ADD_NORMAL
+            elif modifier_type in [
+                WeightModifierType.ADD_NORMAL_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+            ]:
+                noise_type = WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL
+
+            if modifier_type in [
+                WeightModifierType.DISCRETIZE,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            ]:
+                quantization_type = WeightQuantizationType.DISCRETIZE
+            elif modifier_type in [
+                WeightModifierType.DISCRETIZE_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+            ]:
+                quantization_type = WeightQuantizationType.DISCRETIZE_PER_CHANNEL
+
+            self.rpu_config.modifier.noise_type = noise_type
+            self.rpu_config.modifier.quantization_type = quantization_type
