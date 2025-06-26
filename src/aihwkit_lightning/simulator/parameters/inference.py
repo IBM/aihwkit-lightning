@@ -16,7 +16,6 @@
 """Inference related parameters for resistive processing units."""
 
 from dataclasses import dataclass, field
-from typing_extensions import deprecated
 
 from aihwkit_lightning.simulator.parameters.helpers import _PrintableMixin
 from aihwkit_lightning.simulator.parameters.enums import (

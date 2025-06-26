@@ -201,7 +201,7 @@ class AnalogLayerBase:
         if self.rpu_config.modifier.enable_during_test:
             self.rpu_config.modifier.enable_during_test = False
             warnings.warn(
-                "You created a modifier with enable_during_test set True. " \
+                "You created a modifier with enable_during_test set True. "
                 "This is deprecated and was set to False."
             )
 
