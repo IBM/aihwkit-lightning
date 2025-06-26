@@ -159,6 +159,11 @@ class AnalogLayerBase:
             self.x_max = None  # type: ignore
 
     def deprecation_adjustment(self) -> None:
+        """
+        This function is called at the end of every analog module's
+        __init__ and makes sure that the RPUConfig of old models
+        is compatible with the current RPUConfig implementation.
+        """
         modifier_type = self.rpu_config.modifier.type
         if modifier_type != WeightModifierType.NONE:
             warnings.warn(

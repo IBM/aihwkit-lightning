@@ -14,8 +14,8 @@
 
 """Utility enumerators for resistive processing units."""
 
-from typing_extensions import deprecated
 from enum import Enum
+from typing_extensions import deprecated
 
 
 @deprecated("You are using AIHWKIT-Lightning version <2. Consider upgrading to v2.")
