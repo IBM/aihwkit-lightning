@@ -18,7 +18,12 @@ from torch import device as torch_device
 from torch.nn import Parameter
 from torch import Tensor, empty, zeros
 from ...simulator.configs import TorchInferenceRPUConfig
-from ...simulator.parameters import WeightClipType, WeightQuantizationType
+from ...simulator.parameters import (
+    WeightClipType,
+    WeightNoiseInjectionType,
+    WeightQuantizationType,
+    WeightModifierType,
+)
 
 
 class AnalogLayerBase:
@@ -152,6 +157,53 @@ class AnalogLayerBase:
             self.input_range_update_idx = None
             self.x_min = None  # type: ignore
             self.x_max = None  # type: ignore
+
+    def deprecation_adjustment(self) -> None:
+        """
+        This function is called at the end of every analog module's
+        __init__ and makes sure that the RPUConfig of old models
+        is compatible with the current RPUConfig implementation.
+        """
+        modifier_type = self.rpu_config.modifier.type
+        if modifier_type != WeightModifierType.NONE:
+            warnings.warn(
+                "You are using the deprecated rpu_config.modifier.type. "
+                "This model was likely trained with AIHWKIT-Lightning version "
+                "<2."
+            )
+            noise_type = WeightNoiseInjectionType.NONE
+            quantization_type = WeightQuantizationType.NONE
+            if modifier_type in [
+                WeightModifierType.ADD_NORMAL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            ]:
+                noise_type = WeightNoiseInjectionType.ADD_NORMAL
+            elif modifier_type in [
+                WeightModifierType.ADD_NORMAL_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+            ]:
+                noise_type = WeightNoiseInjectionType.ADD_NORMAL_PER_CHANNEL
+
+            if modifier_type in [
+                WeightModifierType.DISCRETIZE,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL,
+            ]:
+                quantization_type = WeightQuantizationType.DISCRETIZE
+            elif modifier_type in [
+                WeightModifierType.DISCRETIZE_PER_CHANNEL,
+                WeightModifierType.DISCRETIZE_ADD_NORMAL_PER_CHANNEL,
+            ]:
+                quantization_type = WeightQuantizationType.DISCRETIZE_PER_CHANNEL
+
+            self.rpu_config.modifier.noise_type = noise_type
+            self.rpu_config.modifier.quantization_type = quantization_type
+
+        if self.rpu_config.modifier.enable_during_test:
+            self.rpu_config.modifier.enable_during_test = False
+            warnings.warn(
+                "You created a modifier with enable_during_test set True. "
+                "This is deprecated and was set to False."
+            )
 
     def quantize_weights(self) -> None:
         """Quantize the weights in-place given the quantization type."""

@@ -15,6 +15,33 @@
 """Utility enumerators for resistive processing units."""
 
 from enum import Enum
+from typing_extensions import deprecated
+
+
+@deprecated("You are using AIHWKIT-Lightning version <2. Consider upgrading to v2.")
+class WeightModifierType(Enum):
+    """Weight modifier type."""
+
+    NONE = "None"
+    """No weight modifier. Nothing happens to the weight. """
+
+    DISCRETIZE = "Discretize"
+    """Quantize the weights."""
+
+    DISCRETIZE_PER_CHANNEL = "DiscretizePerChannel"
+    """Quantize the weights per channel."""
+
+    ADD_NORMAL = "AddNormal"
+    """Additive Gaussian noise."""
+
+    ADD_NORMAL_PER_CHANNEL = "AddNormalPerChannel"
+    """Additive Gaussian noise per channel."""
+
+    DISCRETIZE_ADD_NORMAL = "DiscretizeAddNormal"
+    """First discretize and then additive Gaussian noise."""
+
+    DISCRETIZE_ADD_NORMAL_PER_CHANNEL = "DiscretizeAddNormalPerChannel"
+    """First discretize per channel and then additive Gaussian noise per channel."""
 
 
 class WeightNoiseInjectionType(Enum):

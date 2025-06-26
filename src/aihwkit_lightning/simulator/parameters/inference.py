@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 
 from aihwkit_lightning.simulator.parameters.helpers import _PrintableMixin
 from aihwkit_lightning.simulator.parameters.enums import (
+    WeightModifierType,
     WeightNoiseInjectionType,
     WeightQuantizationType,
     WeightClipType,
@@ -50,6 +51,14 @@ class WeightModifierParameter(_PrintableMixin):
     ``res`` is only used in the modifier types ``Discretize`` and
     ``DiscretizeAddNormal``.
     """
+
+    enable_during_test: bool = False
+    """Deprecated."""
+
+    type: WeightModifierType = field(
+        default_factory=lambda: WeightModifierType.NONE, metadata={"always_show": True}
+    )
+    """Type of the weight modification. Deprecated."""
 
     noise_type: WeightNoiseInjectionType = field(
         default_factory=lambda: WeightNoiseInjectionType.NONE, metadata={"always_show": True}

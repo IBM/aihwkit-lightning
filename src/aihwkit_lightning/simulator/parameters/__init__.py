@@ -15,7 +15,12 @@
 # This import is required in order to load the `torch` shared libraries, which
 # the simulator shared library is linked against.
 
-from .enums import WeightNoiseInjectionType, WeightQuantizationType, WeightClipType
+from .enums import (
+    WeightNoiseInjectionType,
+    WeightQuantizationType,
+    WeightClipType,
+    WeightModifierType,
+)
 
 from .io import IOParameters
 
