@@ -16,6 +16,7 @@
 """Inference related parameters for resistive processing units."""
 
 from dataclasses import dataclass, field
+from typing_extensions import deprecated
 
 from aihwkit_lightning.simulator.parameters.helpers import _PrintableMixin
 from aihwkit_lightning.simulator.parameters.enums import (
@@ -51,6 +52,9 @@ class WeightModifierParameter(_PrintableMixin):
     ``res`` is only used in the modifier types ``Discretize`` and
     ``DiscretizeAddNormal``.
     """
+
+    enable_during_test: bool = False
+    """Deprecated."""
 
     type: WeightModifierType = field(
         default_factory=lambda: WeightModifierType.NONE, metadata={"always_show": True}

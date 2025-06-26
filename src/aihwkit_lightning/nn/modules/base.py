@@ -198,6 +198,13 @@ class AnalogLayerBase:
             self.rpu_config.modifier.noise_type = noise_type
             self.rpu_config.modifier.quantization_type = quantization_type
 
+        if self.rpu_config.modifier.enable_during_test:
+            self.rpu_config.modifier.enable_during_test = False
+            warnings.warn(
+                "You created a modifier with enable_during_test set True. " \
+                "This is deprecated and was set to False."
+            )
+
     def quantize_weights(self) -> None:
         """Quantize the weights in-place given the quantization type."""
         warnings.warn("Modified the rpu_config because quantize_weights was called.")
