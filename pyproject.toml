@@ -4,7 +4,7 @@ requires = ["setuptools"]
 [project]
 requires-python = ">= 3.8"
 name = "aihwkit_lightning"
-version = "2.0.0"
+version = "2.0.1"
 authors = [
   {name = "Corey Lammie", email = "corey.lammie@ibm.com"},
   {name = "William Simon", email = "william.simon1@ibm.com"},
