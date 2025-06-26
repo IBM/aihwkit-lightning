@@ -221,17 +221,16 @@ class TorchLinear:
             else:
                 assumed_wmax = None
 
-            if training:
-                modified_slice = clip_and_quantize(
-                    inp_weight=modified_slice,
-                    assumed_wmax=assumed_wmax,
-                    learnable_weight_clip=(
-                        None
-                        if learnable_weight_clip is None
-                        else learnable_weight_clip[slice_idx].unsqueeze(-1)
-                    ),
-                    rpu_config=rpu_config,
-                )
+            modified_slice = clip_and_quantize(
+                inp_weight=modified_slice,
+                assumed_wmax=assumed_wmax,
+                learnable_weight_clip=(
+                    None
+                    if learnable_weight_clip is None
+                    else learnable_weight_clip[slice_idx].unsqueeze(-1)
+                ),
+                rpu_config=rpu_config,
+            )
             if rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
                 assert rpu_config.modifier.quantization_type in [
                     WeightQuantizationType.NONE,

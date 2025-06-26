@@ -11,6 +11,7 @@
 # that they have been altered from the originals.
 
 """Base class for adding functionality to analog layers."""
+import warnings
 from typing import Tuple, Generator, Callable, List, Any
 from torch import dtype as torch_dtype
 from torch import device as torch_device
@@ -154,4 +155,6 @@ class AnalogLayerBase:
 
     def quantize_weights(self) -> None:
         """Quantize the weights in-place given the quantization type."""
+        warnings.warn("Modified the rpu_config because quantize_weights was called.")
         self.rpu_config.modifier.quantization_type = WeightQuantizationType.NONE
+        self.rpu_config.clip.type = WeightClipType.NONE
