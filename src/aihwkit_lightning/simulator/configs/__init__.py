@@ -21,6 +21,7 @@ from aihwkit_lightning.simulator.parameters import (
     PrePostProcessingParameter,
 )
 from aihwkit_lightning.simulator.parameters.enums import (
+    WeightModifierType,
     WeightNoiseInjectionType,
     WeightQuantizationType,
     WeightClipType,
