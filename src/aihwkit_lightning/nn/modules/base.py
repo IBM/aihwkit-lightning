@@ -11,13 +11,14 @@
 # that they have been altered from the originals.
 
 """Base class for adding functionality to analog layers."""
+import warnings
 from typing import Tuple, Generator, Callable, List, Any
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch.nn import Parameter
 from torch import Tensor, empty, zeros
 from ...simulator.configs import TorchInferenceRPUConfig
-from ...simulator.parameters import WeightClipType
+from ...simulator.parameters import WeightClipType, WeightQuantizationType
 
 
 class AnalogLayerBase:
@@ -151,3 +152,9 @@ class AnalogLayerBase:
             self.input_range_update_idx = None
             self.x_min = None  # type: ignore
             self.x_max = None  # type: ignore
+
+    def quantize_weights(self) -> None:
+        """Quantize the weights in-place given the quantization type."""
+        warnings.warn("Modified the rpu_config because quantize_weights was called.")
+        self.rpu_config.modifier.quantization_type = WeightQuantizationType.NONE
+        self.rpu_config.clip.type = WeightClipType.NONE
