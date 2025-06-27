@@ -80,6 +80,6 @@ class AnalogOptimizer(Optimizer):
         def hook(*_: Any, **__: Any):
             for analog_layer in analog_layers:
                 analog_layer: AnalogLayerBase  # type: ignore[no-redef]
-                analog_layer.clip_weights()
+                analog_layer.post_step()
 
         self.register_step_post_hook(hook)

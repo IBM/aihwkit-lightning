@@ -119,6 +119,7 @@ class TorchLinear:
         bias: Union[None, Tensor],
         input_range: Union[None, Tensor],
         input_range_update_idx: Union[None, Tensor],
+        input_range_delta: Union[None, Tensor],
         x_min: Union[None, Tensor],
         x_max: Union[None, Tensor],
         learnable_weight_clip: Union[None, Tensor],
@@ -130,6 +131,9 @@ class TorchLinear:
         """Forward function for the linear layer. Performs x @ W^T + b."""
         current_upper = 0
         out = 0.0
+        input_range_hat = None
+        if input_range is not None:
+            input_range_hat = input_range.clone()
         for slice_idx, inp_size in enumerate(in_sizes):
             inp_slice = inp[..., current_upper : current_upper + inp_size]  # noqa: E203
 
@@ -160,18 +164,21 @@ class TorchLinear:
                     assert (
                         input_range_update_idx is not None
                     ), "Input range update index must be provided"
+
                     inp_slice, upper_thresh, lower_thresh = TorchLinear.apply_input_range(
                         values=inp_slice,
                         slice_idx=slice_idx,
                         rpu_config=rpu_config,
-                        input_range=input_range,
+                        input_range=input_range_hat,
                         input_range_update_idx=input_range_update_idx,
                         update_from_data=training,
                     )
 
+                    input_range_delta[slice_idx] = input_range[slice_idx] - input_range_hat[slice_idx]
+
                     inp_slice = InputRangeForward.apply(
                         inp_slice,
-                        input_range[slice_idx],
+                        input_range_hat[slice_idx],
                         upper_thresh,
                         lower_thresh,
                         rpu_config.pre_post.input_range.decay,

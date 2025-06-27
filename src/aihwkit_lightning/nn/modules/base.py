@@ -16,7 +16,7 @@ from typing import Tuple, Generator, Callable, List, Any
 from torch import dtype as torch_dtype
 from torch import device as torch_device
 from torch.nn import Parameter
-from torch import Tensor, empty, zeros
+from torch import Tensor, empty, zeros, zeros_like
 from ...simulator.configs import TorchInferenceRPUConfig
 from ...simulator.parameters import (
     WeightClipType,
@@ -141,6 +141,7 @@ class AnalogLayerBase:
                     init_value_counter
                 ),
             )
+            self.input_range_delta = zeros_like(self.input_range)
             # needed for the fast mode
             self.register_buffer(  # type: ignore[call-arg]
                 "x_min", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
@@ -155,8 +156,23 @@ class AnalogLayerBase:
         else:
             self.input_range = None  # type: ignore
             self.input_range_update_idx = None
+            self.input_range_delta = None
             self.x_min = None  # type: ignore
             self.x_max = None  # type: ignore
+
+    def post_step(self) -> None:
+        """Called after optimizer.step()."""
+        self.clip_weights()
+        for slice_idx in range(len(self.in_sizes)):
+            if self.input_range is not None and self.input_range_update_idx[slice_idx] <= self.rpu_config.pre_post.input_range.init_from_data:
+                assert self.input_range_delta is not None, "Input range delta was not set"
+                self.input_range.data[slice_idx] -= self.input_range_delta[slice_idx]
+                if self.input_range_update_idx[slice_idx] == self.rpu_config.pre_post.input_range.init_from_data:
+                    # if we are exactly at the number of steps, we need to add one
+                    # to avoid constantly updating the input range with a delta
+                    # that does not change anymore because we don't update the
+                    # input ranges from data anymore.
+                    self.input_range_update_idx[slice_idx] += 1
 
     def deprecation_adjustment(self) -> None:
         """

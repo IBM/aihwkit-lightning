@@ -449,6 +449,7 @@ class TritonLinear(Function):
         weights: Tensor,
         input_range: Tensor | None,
         input_range_update_idx: Tensor | None,
+        input_range_delta: Tensor | None,
         learnable_weight_clip: Tensor | None,
         upper_end_of_slices: Tensor,
         rpu_config: TorchInferenceRPUConfig,
@@ -464,6 +465,7 @@ class TritonLinear(Function):
             input_range: Tensor of input range(s)
             input_range_update_idx: How often did every input range
                 get updated by data already?
+            input_range_delta: Save the delta of the in-place update
             learnable_weight_clip: Tensor storing per-slice per-column learned ranges
             upper_end_of_slices: [128, 256] if a 256-sized layer is
                 split by 128-sized chunks
@@ -496,6 +498,7 @@ class TritonLinear(Function):
         num_slices = len(upper_end_of_slices)
 
         # update the input ranges if necessary
+        input_range_hat = None
         if training and input_range_update_idx is not None and input_range is not None:
             ir_params = rpu_config.pre_post.input_range
             if input_range_update_idx[0] < ir_params.init_from_data:
@@ -508,16 +511,18 @@ class TritonLinear(Function):
                 #                 + ir_params.init_std_alpha * stds
                 #             ) / (input_range_update_idx + 1)
                 #     input_range_update_idx += 1
+                input_range_hat = input_range.clone()
                 for slice_idx in range(num_slices):
                     idx = input_range_update_idx[slice_idx]
                     if idx < ir_params.init_from_data:
                         std = stds[slice_idx]
                         if std > 0.0:
-                            input_range.data[slice_idx] = (
+                            input_range_hat[slice_idx] = (
                                 input_range.data[slice_idx] * idx + ir_params.init_std_alpha * std
                             ) / (idx + 1)
                             input_range_update_idx[slice_idx] += 1
-                        input_range.data[slice_idx] = input_range.data[slice_idx].abs()
+                        input_range_hat[slice_idx] = input_range_hat[slice_idx].abs()
+                        input_range_delta[slice_idx] = input_range[slice_idx] - input_range_hat[slice_idx]
 
         out_size, hidden_size = weights.shape
         inp_size = inp.size(0)
@@ -622,10 +627,10 @@ class TritonLinear(Function):
 
         # preprocess the input range here to have shape [num_slices, -1]
         # i.e. for every token, we have num_slices many IRs
-        if input_range is None:
+        if input_range_hat is None:
             expanded_input_range = sliced_fast_abs_max(inp, upper_end_of_slices=upper_end_of_slices)
         else:
-            expanded_input_range = input_range.unsqueeze(1).repeat(num_slices, inp.size(0))
+            expanded_input_range = input_range_hat.unsqueeze(1).repeat(num_slices, inp.size(0))
 
         dtype = tl.float32 if inp.dtype == float32 else tl.float16
 
@@ -683,7 +688,7 @@ class TritonLinear(Function):
         # save some stuff for backwards
         ctx.rpu_config = rpu_config  # type: ignore[attr-defined]
         ctx.save_for_backward(
-            inp, weights, None if ir_dynamic else input_range, ir_vector  # type: ignore[arg-type]
+            inp, weights, None if ir_dynamic else input_range_hat, ir_vector  # type: ignore[arg-type]
         )
 
         out = out.view(out_shape)
@@ -694,7 +699,7 @@ class TritonLinear(Function):
     # pylint: disable=too-many-locals
     def backward(
         ctx: FunctionCtx, grad_output: Tensor
-    ) -> Tuple[Tensor, Tensor, Tensor | None, None, None, None, None, None]:  # type: ignore
+    ) -> Tuple[Tensor, Tensor, Tensor | None, None, None, None, None, None, None]:  # type: ignore
         """Straight-through estimator for linear layer
 
         Args:
@@ -761,4 +766,4 @@ class TritonLinear(Function):
                 ir_grad += decay * input_range * (percentage > input_min_percentage)
 
             grad_inp[did_clamp_mask] = 0.0
-        return grad_inp, grad_w, ir_grad, None, None, None, None, None
+        return grad_inp, grad_w, ir_grad, None, None, None, None, None, None
