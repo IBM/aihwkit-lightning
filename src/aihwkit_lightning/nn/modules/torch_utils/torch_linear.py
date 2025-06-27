@@ -164,6 +164,8 @@ class TorchLinear:
                     assert (
                         input_range_update_idx is not None
                     ), "Input range update index must be provided"
+                    assert input_range_hat is not None, "Cloned input range is None"
+                    assert input_range_delta is not None, "Input range delta is None"
 
                     inp_slice, upper_thresh, lower_thresh = TorchLinear.apply_input_range(
                         values=inp_slice,
@@ -174,7 +176,9 @@ class TorchLinear:
                         update_from_data=training,
                     )
 
-                    input_range_delta[slice_idx] = input_range[slice_idx] - input_range_hat[slice_idx]
+                    input_range_delta[slice_idx] = (
+                        input_range[slice_idx] - input_range_hat[slice_idx]
+                    )
 
                     inp_slice = InputRangeForward.apply(
                         inp_slice,

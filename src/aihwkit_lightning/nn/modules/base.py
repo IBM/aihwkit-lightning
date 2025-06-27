@@ -155,8 +155,8 @@ class AnalogLayerBase:
             self.x_max += 1e-5
         else:
             self.input_range = None  # type: ignore
-            self.input_range_update_idx = None
-            self.input_range_delta = None
+            self.input_range_update_idx = None  # type: ignore
+            self.input_range_delta = None  # type: ignore
             self.x_min = None  # type: ignore
             self.x_max = None  # type: ignore
 
@@ -164,10 +164,18 @@ class AnalogLayerBase:
         """Called after optimizer.step()."""
         self.clip_weights()
         for slice_idx in range(len(self.in_sizes)):
-            if self.input_range is not None and self.input_range_update_idx[slice_idx] <= self.rpu_config.pre_post.input_range.init_from_data:
+            if (
+                self.input_range is not None
+                and self.input_range_update_idx is not None
+                and self.input_range_update_idx[slice_idx]
+                <= self.rpu_config.pre_post.input_range.init_from_data
+            ):
                 assert self.input_range_delta is not None, "Input range delta was not set"
                 self.input_range.data[slice_idx] -= self.input_range_delta[slice_idx]
-                if self.input_range_update_idx[slice_idx] == self.rpu_config.pre_post.input_range.init_from_data:
+                if (
+                    self.input_range_update_idx[slice_idx]
+                    == self.rpu_config.pre_post.input_range.init_from_data
+                ):
                     # if we are exactly at the number of steps, we need to add one
                     # to avoid constantly updating the input range with a delta
                     # that does not change anymore because we don't update the

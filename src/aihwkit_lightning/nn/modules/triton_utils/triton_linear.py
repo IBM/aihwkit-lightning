@@ -501,6 +501,7 @@ class TritonLinear(Function):
         input_range_hat = None
         if training and input_range_update_idx is not None and input_range is not None:
             ir_params = rpu_config.pre_post.input_range
+            assert input_range_delta is not None, "Must be tensor"
             if input_range_update_idx[0] < ir_params.init_from_data:
                 # Avoiding the for loop yields a speed-up.
                 stds = sliced_fast_std(inp, upper_end_of_slices)
@@ -522,7 +523,9 @@ class TritonLinear(Function):
                             ) / (idx + 1)
                             input_range_update_idx[slice_idx] += 1
                         input_range_hat[slice_idx] = input_range_hat[slice_idx].abs()
-                        input_range_delta[slice_idx] = input_range[slice_idx] - input_range_hat[slice_idx]
+                        input_range_delta[slice_idx] = (
+                            input_range[slice_idx] - input_range_hat[slice_idx]
+                        )
 
         out_size, hidden_size = weights.shape
         inp_size = inp.size(0)
@@ -688,7 +691,10 @@ class TritonLinear(Function):
         # save some stuff for backwards
         ctx.rpu_config = rpu_config  # type: ignore[attr-defined]
         ctx.save_for_backward(
-            inp, weights, None if ir_dynamic else input_range_hat, ir_vector  # type: ignore[arg-type]
+            inp,
+            weights,
+            None if ir_dynamic else input_range_hat,  # type: ignore[arg-type]
+            ir_vector,
         )
 
         out = out.view(out_shape)
