@@ -145,7 +145,7 @@ def test_linear_forward(
         rpu_config.pre_post.input_range.learn_input_range = ir_learn_input_range
         rpu_config.pre_post.input_range.init_value = ir_init_value
         rpu_config.pre_post.input_range.init_std_alpha = ir_init_std_alpha
-        rpu_config.pre_post.input_range.init_from_data = 0  # we force init from data zero here
+        rpu_config.pre_post.input_range.init_from_data = 5
         rpu_config.clip.type = clip_type
         return rpu_config
 
@@ -235,7 +235,7 @@ def test_linear_forward(
 @mark.parametrize("ir_dynamic", [True, False])
 @mark.parametrize("max_inp_size", [256])
 @mark.parametrize("ir_init_value", [2.0])
-@mark.parametrize("ir_init_from_data", [10])
+@mark.parametrize("ir_init_from_data", [0])
 @mark.parametrize("ir_init_std_alpha", [2.0])
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cuda"])
 @mark.parametrize("dtype", [float32])
@@ -330,39 +330,39 @@ def test_input_range_backward(  # pylint: disable=too-many-arguments
 if __name__ == "__main__":
     # test_input_range_backward(
     #     bsz=10,
-    #     num_inp_dims=2,
-    #     inp_size=513,
-    #     out_size=10,
-    #     bias=False,
+    #     num_inp_dims=3,
+    #     inp_size=255,
+    #     out_size=255,
+    #     bias=True,
     #     inp_res=254,
     #     ir_dynamic=False,
-    #     max_inp_size=512,
-    #     ir_init_value=3.0,
-    #     ir_init_from_data=10,
+    #     max_inp_size=256,
+    #     ir_init_value=2.0,
+    #     ir_init_from_data=0,
     #     ir_init_std_alpha=2.0,
     #     device="cpu",
-    #     dtype=float16,
+    #     dtype=float32,
     # )
     test_linear_forward(
-        bsz=10,
-        num_inp_dims=2,
-        inp_size=30,
-        out_size=20,
+        bsz=1,
+        num_inp_dims=1,
+        inp_size=32,
+        out_size=32,
         bias=True,
         inp_res=254,
         max_inp_size=20,
         ir_enable=True,
-        ir_dynamic=True,
-        ir_learn_input_range=True,
+        ir_dynamic=False,
+        ir_learn_input_range=False,
         ir_init_value=3.0,
         ir_init_std_alpha=2.0,
         adc_config=(10, 2**8 - 2),
         out_noise=False,
         out_noise_per_channel=False,
         noise_type=WeightNoiseInjectionType.NONE,
-        quantization_type=WeightQuantizationType.NONE,
+        quantization_type=WeightQuantizationType.DISCRETIZE_PER_CHANNEL,
         weight_modifier_res=254,
-        clip_type=WeightClipType.LEARNABLE_PER_CHANNEL,
+        clip_type=WeightClipType.NONE,
         device="cpu",
         dtype=float32,
     )

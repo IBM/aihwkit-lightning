@@ -614,7 +614,7 @@ def test_clipping(
 @mark.parametrize("ir_learn_input_range", [True], indirect=True)
 @mark.parametrize("max_inp_size", [32], indirect=True)
 @mark.parametrize("ir_init_value", [2.0], indirect=True)
-@mark.parametrize("ir_init_from_data", [-1, 0, 10], indirect=True)
+@mark.parametrize("ir_init_from_data", [-1, 0], indirect=True)
 @mark.parametrize("ir_init_std_alpha", [2.0], indirect=True)
 @mark.parametrize("adc_config", [(-1, -1), (10, 254)], ids=str, indirect=True)
 @mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])

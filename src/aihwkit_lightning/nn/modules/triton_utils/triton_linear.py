@@ -498,8 +498,9 @@ class TritonLinear(Function):
         num_slices = len(upper_end_of_slices)
 
         # update the input ranges if necessary
-        input_range_hat = None
+        input_range_hat = input_range.clone() if input_range is not None else None
         if training and input_range_update_idx is not None and input_range is not None:
+            assert input_range_hat is not None, "Input range must be available."
             ir_params = rpu_config.pre_post.input_range
             assert input_range_delta is not None, "Must be tensor"
             if input_range_update_idx[0] < ir_params.init_from_data:
@@ -512,7 +513,6 @@ class TritonLinear(Function):
                 #                 + ir_params.init_std_alpha * stds
                 #             ) / (input_range_update_idx + 1)
                 #     input_range_update_idx += 1
-                input_range_hat = input_range.clone()
                 for slice_idx in range(num_slices):
                     idx = input_range_update_idx[slice_idx]
                     if idx < ir_params.init_from_data:

@@ -164,3 +164,19 @@ def test_calibration(
                         atol=1e-5,
                     )
             current_upper += inp_size
+
+
+if __name__ == "__main__":
+    test_calibration(
+        module=AnalogLinear,
+        cal_type=InputRangeCalibrationType.MOVING_STD,
+        total_num_samples=100,
+        in_size=10,
+        out_size=10,
+        inp_res=-1,
+        max_inp_size=256,
+        ir_enable=False,
+        is_test=True,
+        device="cpu",
+        dtype=float32
+    )

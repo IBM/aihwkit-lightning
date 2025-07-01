@@ -95,9 +95,6 @@ def test_torch_compile(  # pylint: disable=too-many-arguments
     if not ir_enable and inp_res > 0:
         raise SkipTest("IR not enabled but inp_res > 0")
 
-    if ir_enable:
-        raise SkipTest("Compile doesn't work with IR learning. We're working on that.")
-
     def populate_rpu(rpu_config: RPUConfig):
         rpu_config.forward.inp_res = inp_res
         rpu_config.forward.out_res = -1
@@ -449,6 +446,21 @@ def benchmark_triton_implementation(max_input_size: int):
 
 
 if __name__ == "__main__":
-    benchmark_triton_implementation(max_input_size=-1)
-    benchmark_triton_implementation(max_input_size=512)
-    benchmark_aihwkit_lightning()
+    # benchmark_triton_implementation(max_input_size=-1)
+    # benchmark_triton_implementation(max_input_size=512)
+    # benchmark_aihwkit_lightning()
+    test_torch_compile(
+        is_test=False,
+        inp_size=256,
+        out_size=256,
+        bias=False,
+        inp_res=254,
+        max_inp_size=256,
+        ir_enable=True,
+        ir_learn_input_range=True,
+        ir_init_value=3.0,
+        ir_init_from_data=0,
+        ir_init_std_alpha=2.0,
+        device="cpu",
+        dtype=float16,
+    )

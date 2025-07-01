@@ -13,7 +13,7 @@
 """Functions for normal linear in PyTorch."""
 from typing import List, Tuple, Union
 from math import sqrt
-from torch import Tensor, randn_like, clamp, zeros_like, stack
+from torch import Tensor, randn_like, clamp, zeros_like
 from torch.autograd import no_grad, Function
 from torch.autograd.function import FunctionCtx
 from aihwkit_lightning.simulator.configs import (
@@ -50,8 +50,15 @@ class StraightThroughClamp(Function):
     # type: ignore[override]
     def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, None, None, None, None]:
         (clamped_mask,) = ctx.saved_tensors  # type: ignore[attr-defined]
-        d_output[clamped_mask] = 0.0
-        return d_output, None, None, None, None
+
+        # doesn't this blow up memory?
+        d_output_zeroed_out = d_output.clone()
+        d_output_zeroed_out[clamped_mask] = 0.0
+
+        # # what works, but not when I use torch.compile
+        # d_output[clamped_mask] = 0.0
+
+        return d_output_zeroed_out, None, None, None, None
 
 
 class InputRangeForward(Function):
@@ -131,9 +138,6 @@ class TorchLinear:
         """Forward function for the linear layer. Performs x @ W^T + b."""
         current_upper = 0
         out = 0.0
-        input_range_hat = None
-        if input_range is not None:
-            input_range_hat = input_range.clone()
         for slice_idx, inp_size in enumerate(in_sizes):
             inp_slice = inp[..., current_upper : current_upper + inp_size]  # noqa: E203
 
@@ -156,33 +160,34 @@ class TorchLinear:
                         x_max=x_max,
                         update_from_data=training,
                     )
+                    slice_input_range = input_range[slice_idx]
                 elif is_dynamic:
-                    input_range = inp_slice.abs().max(dim=-1, keepdim=True)[0]
-                    input_range = stack([input_range for _ in range(len(in_sizes))])
+                    slice_input_range = inp_slice.abs().max(dim=-1, keepdim=True)[0]
                 else:
                     assert input_range is not None, "Input range must be provided"
                     assert (
                         input_range_update_idx is not None
                     ), "Input range update index must be provided"
-                    assert input_range_hat is not None, "Cloned input range is None"
-                    assert input_range_delta is not None, "Input range delta is None"
 
-                    inp_slice, upper_thresh, lower_thresh = TorchLinear.apply_input_range(
-                        values=inp_slice,
-                        slice_idx=slice_idx,
-                        rpu_config=rpu_config,
-                        input_range=input_range_hat,
-                        input_range_update_idx=input_range_update_idx,
-                        update_from_data=training,
+                    # slice_input_range might get changed in diff'able manner here
+                    # originally from input_range which is the learnable parameter
+                    inp_slice, upper_thresh, lower_thresh, slice_input_range = (
+                        TorchLinear.apply_input_range(
+                            values=inp_slice,
+                            slice_idx=slice_idx,
+                            rpu_config=rpu_config,
+                            input_range=input_range,
+                            input_range_update_idx=input_range_update_idx,
+                            update_from_data=training,
+                        )
                     )
 
-                    input_range_delta[slice_idx] = (
-                        input_range[slice_idx] - input_range_hat[slice_idx]
-                    )
+                    if input_range_delta is not None:
+                        input_range_delta[slice_idx] = input_range[slice_idx] - slice_input_range
 
                     inp_slice = InputRangeForward.apply(
                         inp_slice,
-                        input_range_hat[slice_idx],
+                        slice_input_range,
                         upper_thresh,
                         lower_thresh,
                         rpu_config.pre_post.input_range.decay,
@@ -191,11 +196,12 @@ class TorchLinear:
 
             # maybe do some quantization
             if rpu_config.forward.inp_res > 0:
-                assert input_range is not None, "Input range must be provided"
+                assert rpu_config.pre_post.input_range.enable, "Input range must be enabled."
+                assert slice_input_range is not None, "Input range must be provided"
                 inp_slice = UniformQuantize.apply(
                     inp_slice,
                     rpu_config.forward.inp_res,
-                    input_range[slice_idx],
+                    slice_input_range,
                     True,
                     False,
                     None,
@@ -295,7 +301,7 @@ class TorchLinear:
 
             if rpu_config.forward.out_bound > 0 or apply_out_quantization:
                 assert (
-                    input_range is not None
+                    slice_input_range is not None
                 ), "Input range must be provided when using an out_bound or out quantization"
                 assert assumed_wmax is not None, "Assumed wmax must be provided for out bound"
                 if rpu_config.clip.type in [
@@ -308,7 +314,7 @@ class TorchLinear:
 
                 with no_grad():
                     bound = (
-                        input_range[slice_idx] * rpu_config.forward.out_bound
+                        slice_input_range * rpu_config.forward.out_bound
                     ) * maybe_reduced_assumed_wmax.view(
                         1, -1
                     )  # type: ignore[union-attr]
@@ -332,7 +338,7 @@ class TorchLinear:
         input_range: Tensor,
         input_range_update_idx: Tensor,
         update_from_data: bool = False,
-    ) -> Tuple[Tensor, Tensor, Tensor]:
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         """Apply the input clipping.
 
         Args:
@@ -348,25 +354,36 @@ class TorchLinear:
         """
         if update_from_data:
             ir_params = rpu_config.pre_post.input_range
-            idx = input_range_update_idx[slice_idx]
+            idx = input_range_update_idx[slice_idx].clone()
             if idx < ir_params.init_from_data:
                 std = values.std()
                 if std > 0.0:
-                    input_range.data[slice_idx] = (
-                        (
-                            input_range.data[slice_idx].float() * idx
-                            + ir_params.init_std_alpha * std.float()
-                        )
-                        / (idx + 1)
-                    ).to(dtype=input_range.dtype)
-                    input_range_update_idx[slice_idx] += 1
-                input_range.data[slice_idx] = input_range.data[slice_idx].abs()
+                    # purposefully cut the gradient flow
+                    # to input_range[slice_idx] because
+                    # it's meaningless in this phase
+                    with no_grad():
+                        input_range_hat = (
+                            (
+                                (
+                                    input_range[slice_idx].float() * idx
+                                    + ir_params.init_std_alpha * std.float()
+                                )
+                                / (idx + 1)
+                            ).abs()
+                        ).to(dtype=input_range.dtype)
+                        input_range_update_idx[slice_idx] += 1
+                else:
+                    with no_grad():
+                        input_range_hat = input_range[slice_idx].clone()
+            else:
+                input_range_hat = input_range[slice_idx].clone()
+        else:
+            input_range_hat = input_range[slice_idx].clone()
 
-        input_range = input_range[slice_idx]
-        upper_thresh = values >= input_range
-        lower_thresh = values <= -input_range
-        x_clamped = StraightThroughClamp.apply(values, upper_thresh, lower_thresh, input_range)
-        return x_clamped, upper_thresh, lower_thresh
+        upper_thresh = values >= input_range_hat
+        lower_thresh = values <= -input_range_hat
+        x_clamped = StraightThroughClamp.apply(values, upper_thresh, lower_thresh, input_range_hat)
+        return x_clamped, upper_thresh, lower_thresh, input_range_hat
 
     @staticmethod
     def apply_input_range_fast(
