@@ -177,7 +177,7 @@ def main():
             (
                 AdamW(model.parameters(), lr=lr)
                 if args.fp
-                else AnalogOptimizer(AdamW, model.analog_layers(), model.parameters(), lr=lr)
+                else AnalogOptimizer(AdamW, model.analog_layers, model.parameters(), lr=lr)
             ),
             None,
         )

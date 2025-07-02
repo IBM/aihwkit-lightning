@@ -33,4 +33,4 @@ accelerate launch \
     --num_processes $NUM_PROCESSES \
     --gpu_ids all \
     --num_machines 1 \
-    train.py --config $HOME/scratch/aihwkit-lightning/examples/deepspeed_and_huggingface/config.yaml
+    train.py --config ./config.yaml

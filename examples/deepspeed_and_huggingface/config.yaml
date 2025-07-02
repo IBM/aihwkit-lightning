@@ -1,6 +1,6 @@
 general:
-  example_directory: ~/scratch/aihwkit-lightning-example/
-  ds_config_path: ~/scratch/aihwkit-lightning/examples/deepspeed_and_huggingface/ds_config.json  # for DeepSpeed
+  example_directory: ./aihwkit-lightning-example/
+  ds_config_path: ./ds_config.json  # for DeepSpeed
   run_name: my-run-name  # for wandb
 
 training_args:

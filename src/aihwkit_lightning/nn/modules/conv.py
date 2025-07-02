@@ -266,6 +266,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
                 self.input_range,
                 self.input_range_update_idx,
                 self.input_range_delta,
+                self.learnable_weight_clip,
                 self.upper_end_of_slices,
                 self.rpu_config,
                 self.training,

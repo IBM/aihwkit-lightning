@@ -13,6 +13,10 @@ pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/
 [OPTIONAL] pip install deepspeed
 ```
 
+> Note: The following used to be necessary for old versions of AIHWKIT-Lightning, but should
+not be needed anymore. We recomment to try running the example before without making
+the following changes.
+
 We had to make another change for the example to run:
 In
 ```bash
@@ -32,7 +36,7 @@ In `path/to/DeepSpeed/requirements/requirements-triton.txt` we also removed the 
 of `triton`.
 
 ## Running the example
-First, find the definition of the `data_path` in the script:
+First, find the definition of the `data_path` in the `cifar10_deepspeed.py`:
 ```bash
 data_path = os.path.expanduser("~/scratch/aihwkit-lightning-example/")
 ```

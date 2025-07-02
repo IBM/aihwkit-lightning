@@ -54,12 +54,16 @@ class CustomTrainer(Trainer):
             )
         else:
             made_step = True
+
+        # confusingly, this also calls step on the deepspeed engine internally
         self.accelerator.backward(loss)
+
         # this is what we changed. we clip the weights when we updated the parameters
         with torch.no_grad():
             if made_step and hasattr(model, "analog_layers"):
                 for analog_layer in model.analog_layers():
-                    analog_layer.clip_weights()
+                    analog_layer.post_step()
+
         return loss.detach() / self.args.gradient_accumulation_steps
 
 

@@ -309,15 +309,14 @@ def main(args):
             loss = criterion(outputs, labels)
 
             model_engine.backward(loss)
+            model_engine.step()
 
             # For DeepSpeed, we need to implement the clipping manually
             # this is what we changed. we clip the weights when we updated the parameters
             with no_grad():
                 if hasattr(net, "analog_layers"):
                     for analog_layer in net.analog_layers():
-                        analog_layer.clip_weights()
-
-            model_engine.step()
+                        analog_layer.post_step()
 
             # Print statistics
             running_loss += loss.item()
