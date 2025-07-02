@@ -78,7 +78,7 @@ class AnalogOptimizer(Optimizer):
         super().__init__(*args, **kwargs)
 
         def hook(*_: Any, **__: Any):
-            for analog_layer in analog_layers:
+            for analog_layer in analog_layers():
                 analog_layer: AnalogLayerBase  # type: ignore[no-redef]
                 analog_layer.post_step()
 

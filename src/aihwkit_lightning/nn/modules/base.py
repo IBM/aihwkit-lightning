@@ -172,6 +172,24 @@ class AnalogLayerBase:
             ):
                 assert self.input_range_delta is not None, "Input range delta was not set"
                 self.input_range.data[slice_idx] -= self.input_range_delta[slice_idx]
+                # deepspeed related:
+                # l. 1991 in deepspeed/runtime/zero/stage_1_and_2.py:
+                # bit16_partition_buffer.data.copy_(fp32_partition.data)
+                # any changes made to the model weights (fp16 partition)
+                # will get overwritten by this copy operation. Note that
+                # the fp32_partition has the fp32 weights + gradients
+                # ZeRO stage 3 param
+                if hasattr(self.input_range, 'ds_id'):
+                    self.input_range._z3_optimizer.set_full_hp_param(
+                        self.input_range.data,
+                        self.input_range
+                    )
+
+                # ZeRO stage 1, 2, and bf16_optimizer params
+                if hasattr(self.input_range, '_hp_mapping'):
+                    self.input_range.set_full_hp_param(
+                        self.input_range.data
+                    )
                 if (
                     self.input_range_update_idx[slice_idx]
                     == self.rpu_config.pre_post.input_range.init_from_data
