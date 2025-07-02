@@ -82,7 +82,7 @@ y = Tensor([[1.0, 0.5], [0.7, 0.3]])
 model = AnalogLinear(4, 2, rpu_config=TorchInferenceRPUConfig())
 
 # Use the analog-aware stochastic gradient descent optimizer.
-opt = AnalogOptimizer(SGD, model.analog_layers(), model.parameters(), lr=0.01)
+opt = AnalogOptimizer(SGD, model.analog_layers, model.parameters(), lr=0.01)
 
 # Train the network.
 for epoch in range(10):
