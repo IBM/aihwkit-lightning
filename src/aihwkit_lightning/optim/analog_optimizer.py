@@ -13,7 +13,7 @@
 """Analog-aware inference optimizer."""
 
 from types import new_class
-from typing import Any, Dict, Type, Generator
+from typing import Any, Dict, Type, Callable, Generator
 
 from torch.optim import Optimizer
 
@@ -68,13 +68,7 @@ class AnalogOptimizer(Optimizer):
         return super().__new__(cls.SUBCLASSES[subclass_name])
 
     # pylint: disable=unused-argument
-    def __init__(
-        self,
-        _: Type,
-        analog_layers: Generator[AnalogLayerBase, None, None],
-        *args: Any,
-        **kwargs: Any,
-    ):
+    def __init__(self, _: Type, analog_layers: Callable[[], Generator], *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
 
         def hook(*_: Any, **__: Any):

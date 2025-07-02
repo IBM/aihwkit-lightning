@@ -179,17 +179,15 @@ class AnalogLayerBase:
                 # will get overwritten by this copy operation. Note that
                 # the fp32_partition has the fp32 weights + gradients
                 # ZeRO stage 3 param
-                if hasattr(self.input_range, 'ds_id'):
+                if hasattr(self.input_range, "ds_id"):
+                    # pylint: disable=protected-access
                     self.input_range._z3_optimizer.set_full_hp_param(
-                        self.input_range.data,
-                        self.input_range
+                        self.input_range.data, self.input_range
                     )
 
                 # ZeRO stage 1, 2, and bf16_optimizer params
-                if hasattr(self.input_range, '_hp_mapping'):
-                    self.input_range.set_full_hp_param(
-                        self.input_range.data
-                    )
+                if hasattr(self.input_range, "_hp_mapping"):
+                    self.input_range.set_full_hp_param(self.input_range.data)
                 if (
                     self.input_range_update_idx[slice_idx]
                     == self.rpu_config.pre_post.input_range.init_from_data

@@ -178,5 +178,5 @@ if __name__ == "__main__":
         ir_enable=False,
         is_test=True,
         device="cpu",
-        dtype=float32
+        dtype=float32,
     )
