@@ -13,7 +13,7 @@
 """Analog-aware inference optimizer."""
 
 from types import new_class
-from typing import Any, Dict, Type, Callable, Generator
+from typing import Any, Dict, Type, Generator, Callable
 
 from torch.optim import Optimizer
 

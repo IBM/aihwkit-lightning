@@ -58,7 +58,7 @@ shown as this
 The values :math:`\beta^\text{inp. quant}` are learnable variables defined per tile (one layer can be chunked into multiple tiles along the input dimension). If we don't chunk, we have one tile per layer.
 In our example, we did :code:`rpu_config.forward.inp_res = 2**8 - 2`, meaning that we want to use 8-bit input quantization. This effectively results in having values in :math:`[-127, 127]` for the input quantization.
 
-Ouput Noise
+Output Noise
 -----------
 
 We also make use of output noise. This noise is injected after the MVM, and before the values are fed into the Analog to Digital Converter (ADC) (if the ADC is defined).
@@ -212,13 +212,15 @@ We can now define the analog optimizer:
 
     from aihwkit_lightning.optim import AnalogOptimizer
     from torch.optim import SGD
-    optimizer = AnalogOptimizer(SGD, analog_model.analog_layers(), analog_model.parameters(), lr=0.1)
+    optimizer = AnalogOptimizer(SGD, analog_model.analog_layers, analog_model.parameters(), lr=0.1)
 
 .. warning::
     The AnalogOptimizer essentially just attaches a :code:`step_post_hook` to the optimizer. The hook just
     iterates ove the analog layers and calls :code:`analog_layer.clip_weights()`.
     This means that your weights are not clipped if you're framework uses a different optimizer internally.
     DeepSpeed does this for example. In Huggingface, this also happens when you don't pass an optimizer to the :code:`Trainer`.
+    Also, you need to pass :code:`analog_model.analog_layers` instead of :code:`analog_model.analog_layers()`
+    as we will use the generator more than once.
 
 Converting to AIHWKIT
 ---------------------
