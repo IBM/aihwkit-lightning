@@ -585,7 +585,7 @@ def test_clipping(
     model = model.to(device=device, dtype=dtype)
     weights = randn_like(model.weight, device=device, dtype=dtype)
     model.set_weights(weights)  # note that this performs a clone internally
-    optim = AnalogOptimizer(AdamW, model.analog_layers(), model.parameters(), lr=0.0)
+    optim = AnalogOptimizer(AdamW, model.analog_layers, model.parameters(), lr=0.0)
     loss: Tensor
     loss = model(randn(10, 10, device=device, dtype=dtype)).sum()  # pylint: disable=not-callable
     loss.backward()

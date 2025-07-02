@@ -220,7 +220,7 @@ def test_optimizer_state():
     normal_optim.step()
 
     # create an analog optimizer
-    optim = AnalogOptimizer(AdamW, analog_model.analog_layers(), analog_model.parameters(), lr=0.01)
+    optim = AnalogOptimizer(AdamW, analog_model.analog_layers, analog_model.parameters(), lr=0.01)
     loss = analog_model(inp)
     loss.sum().backward()
     optim.step()
