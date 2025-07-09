@@ -564,7 +564,9 @@ class TritonLinear(Function):
                 ):
                     modifier_weight_res = 2  # from -1 to 1
 
-            block_args = (32, 32) if requires_blocksizes(modifier_kernel, weight_modifier_grid) else tuple()
+            block_args = (
+                (32, 32) if requires_blocksizes(modifier_kernel, weight_modifier_grid) else tuple()
+            )
             modifier_kernel[weight_modifier_grid](
                 # pointers to tensors
                 weights.T,  # 2D [hidden_size, out_size]
