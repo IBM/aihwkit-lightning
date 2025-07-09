@@ -50,15 +50,10 @@ class StraightThroughClamp(Function):
     # type: ignore[override]
     def backward(ctx: FunctionCtx, d_output: Tensor) -> Tuple[Tensor, None, None, None, None]:
         (clamped_mask,) = ctx.saved_tensors  # type: ignore[attr-defined]
+        # torch.compile: works only with latest torch
+        d_output[clamped_mask] = 0.0
 
-        # doesn't this blow up memory?
-        d_output_zeroed_out = d_output.clone()
-        d_output_zeroed_out[clamped_mask] = 0.0
-
-        # # what works, but not when I use torch.compile
-        # d_output[clamped_mask] = 0.0
-
-        return d_output_zeroed_out, None, None, None, None
+        return d_output, None, None, None, None
 
 
 class InputRangeForward(Function):
