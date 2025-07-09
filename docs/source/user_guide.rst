@@ -219,7 +219,7 @@ We can now define the analog optimizer:
     iterates ove the analog layers and calls :code:`analog_layer.clip_weights()`.
     This means that your weights are not clipped if you're framework uses a different optimizer internally.
     DeepSpeed does this for example. In Huggingface, this also happens when you don't pass an optimizer to the :code:`Trainer`.
-    Also, you need to pass :code:`analog_model.analog_layers` instead of :code:`analog_model.analog_layers()`
+    Also, you need to pass :code:`analog_model.analog_layers` instead of :code:`analog_model.analog_layers`
     as we will use the generator more than once.
 
 Converting to AIHWKIT
