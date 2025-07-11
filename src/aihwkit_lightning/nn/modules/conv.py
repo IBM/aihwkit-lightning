@@ -590,15 +590,31 @@ class AnalogConv2d(_AnalogConvNd):
 
         if clip_type in [WeightClipType.NONE, WeightClipType.LEARNABLE_PER_CHANNEL]:
             return
+
+        deepspeed = False
+        if hasattr(self.weight, "ds_id") or hasattr(self.weight, "_hp_mapping"):
+            from deepspeed.utils import safe_get_full_fp32_param, safe_set_full_fp32_param
+            deepspeed = True
+
         assert clip_sigma > 0, "Clip sigma must be greater than 0"
         sigma_std = clip_sigma * two_dim_weights.std(
             None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
         )
+        if deepspeed:
+            hp_weight = safe_get_full_fp32_param(self.weight)
+            two_dim_hp_weight = hp_weight.view(self.out_channels, -1)
+            hp_sigma = clip_sigma * two_dim_hp_weight.std(
+                None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
+            )
         if clip_type in [WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL]:
             two_dim_weights.data.clamp_(-sigma_std, sigma_std)
+            if deepspeed:
+                two_dim_hp_weight.data.clamp_(-hp_sigma, hp_sigma)
         else:
             raise ValueError(f"Unknown clip type {clip_type}")
         self.weight.data = two_dim_weights.view_as(self.weight)
+        if deepspeed:
+            safe_set_full_fp32_param(self.weight, hp_weight.view_as(self.weight))
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)

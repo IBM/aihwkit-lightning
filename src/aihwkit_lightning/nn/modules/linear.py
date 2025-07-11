@@ -269,20 +269,41 @@ class AnalogLinear(Linear, AnalogLayerBase):
         return (self.weight, self.bias)
 
     def clip_weights(self) -> None:
-        """Clip the weights."""
+        """
+        Clip the weights.
+
+        > Note: For DeepSpeed, we clamp both the fp16 and fp32 base weights.
+            This is important when mixed precision (satge 1-3) is used.
+        """
         clip_type = self.rpu_config.clip.type
         clip_sigma = self.rpu_config.clip.sigma
 
         if clip_type in [WeightClipType.NONE, WeightClipType.LEARNABLE_PER_CHANNEL]:
             return
+
+        deepspeed = False
+        if hasattr(self.weight, "ds_id") or hasattr(self.weight, "_hp_mapping"):
+            from deepspeed.utils import safe_get_full_fp32_param, safe_set_full_fp32_param
+            deepspeed = True
+
         assert clip_sigma > 0, "Clip sigma must be greater than 0"
         sigma_std = clip_sigma * self.weight.std(
             None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
         )
+        if deepspeed:
+            hp_weight = safe_get_full_fp32_param(self.weight)
+            hp_sigma = clip_sigma * hp_weight.std(
+                None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
+            )
         if clip_type in [WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL]:
             self.weight.data.clamp_(-sigma_std, sigma_std)
+            if deepspeed:
+                hp_weight.data.clamp_(-hp_sigma, hp_sigma)
         else:
             raise ValueError(f"Unknown clip type {clip_type}")
+        
+        if deepspeed:
+            safe_set_full_fp32_param(self.weight, hp_weight)
 
     @no_grad()
     def quantize_weights(self) -> None:
