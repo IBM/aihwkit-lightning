@@ -22,6 +22,7 @@ class LambdaLayer(torch.nn.Module):
 
 class BasicBlock(torch.nn.Module):
     expansion = 1
+
     def __init__(self, in_planes, planes, stride=1, option="A"):
         super(BasicBlock, self).__init__()
         self.conv1 = torch.nn.Conv2d(

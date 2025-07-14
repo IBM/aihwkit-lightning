@@ -23,4 +23,4 @@ if __name__ == "__main__":
     new_rpu_config.drift_compensation = GlobalDriftCompensation()
     aihwkit_model.replace_rpu_config(new_rpu_config)
     aihwkit_model.eval()
-    aihwkit_model.drift_analog_weights(0.)    
+    aihwkit_model.drift_analog_weights(0.0)
