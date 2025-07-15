@@ -594,6 +594,7 @@ class AnalogConv2d(_AnalogConvNd):
         deepspeed = False
         if hasattr(self.weight, "ds_id") or hasattr(self.weight, "_hp_mapping"):
             from deepspeed.utils import safe_get_full_fp32_param, safe_set_full_fp32_param
+
             deepspeed = True
 
         assert clip_sigma > 0, "Clip sigma must be greater than 0"

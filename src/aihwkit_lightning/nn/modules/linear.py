@@ -15,7 +15,7 @@ from typing import Optional, Tuple, List
 import os
 from copy import deepcopy
 from logging import warning
-from torch import Tensor, cuda, no_grad, tensor, int32
+from torch import Tensor, cuda, no_grad, tensor, narrow, int32
 from torch.nn import Linear
 
 from .base import AnalogLayerBase
@@ -268,6 +268,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
         """
         return (self.weight, self.bias)
 
+    @no_grad()
     def clip_weights(self) -> None:
         """
         Clip the weights.
@@ -284,6 +285,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
         deepspeed = False
         if hasattr(self.weight, "ds_id") or hasattr(self.weight, "_hp_mapping"):
             from deepspeed.utils import safe_get_full_fp32_param, safe_set_full_fp32_param
+
             deepspeed = True
 
         assert clip_sigma > 0, "Clip sigma must be greater than 0"
@@ -291,19 +293,35 @@ class AnalogLinear(Linear, AnalogLayerBase):
             None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
         )
         if deepspeed:
-            hp_weight = safe_get_full_fp32_param(self.weight)
-            hp_sigma = clip_sigma * hp_weight.std(
-                None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
-            )
+            if hasattr(self.weight, "ds_id"):
+                # stage 3
+                hp_weight = safe_get_full_fp32_param(self.weight)
+                hp_sigma = clip_sigma * hp_weight.std(
+                    None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
+                )
         if clip_type in [WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL]:
+            did_clip = (self.weight.abs() >= sigma_std).flatten()
             self.weight.data.clamp_(-sigma_std, sigma_std)
-            if deepspeed:
+            clipped_weights = self.weight.data.flatten()
+            if deepspeed and hasattr(self.weight, "ds_id"):
                 hp_weight.data.clamp_(-hp_sigma, hp_sigma)
         else:
             raise ValueError(f"Unknown clip type {clip_type}")
-        
+
         if deepspeed:
-            safe_set_full_fp32_param(self.weight, hp_weight)
+            if hasattr(self.weight, "ds_id"):
+                # stage 3
+                safe_set_full_fp32_param(self.weight, hp_weight)
+            elif self.weight._hp_mapping is not None:
+                # stage 1 and 2
+                lp_frag_address = self.weight._hp_mapping.lp_fragment_address
+                start, numel = lp_frag_address.start, lp_frag_address.numel
+                clipped_weights_frag = clipped_weights[start : start + numel]
+                hp_frag = self.weight._hp_mapping.get_hp_fragment(None)
+                did_clip_frag = did_clip[start : start + numel].to(device=hp_frag.device)
+                hp_frag[did_clip_frag] = clipped_weights_frag[did_clip_frag].to(
+                    device=hp_frag.device, dtype=hp_frag.dtype
+                )
 
     @no_grad()
     def quantize_weights(self) -> None:
