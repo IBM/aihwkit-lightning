@@ -15,7 +15,7 @@ from typing import Optional, Tuple, List
 import os
 from copy import deepcopy
 from logging import warning
-from torch import Tensor, cuda, no_grad, tensor, narrow, int32
+from torch import Tensor, cuda, no_grad, tensor, int32
 from torch.nn import Linear
 
 from .base import AnalogLayerBase
@@ -276,6 +276,9 @@ class AnalogLinear(Linear, AnalogLayerBase):
         > Note: For DeepSpeed, we clamp both the fp16 and fp32 base weights.
             This is important when mixed precision (satge 1-3) is used.
         """
+
+        # pylint: disable=too-many-locals, protected-access
+
         clip_type = self.rpu_config.clip.type
         clip_sigma = self.rpu_config.clip.sigma
 
@@ -312,7 +315,7 @@ class AnalogLinear(Linear, AnalogLayerBase):
             if hasattr(self.weight, "ds_id"):
                 # stage 3
                 safe_set_full_fp32_param(self.weight, hp_weight)
-            elif self.weight._hp_mapping is not None:
+            elif hasattr(self.weight, "_hp_mapping") and self.weight._hp_mapping is not None:
                 # stage 1 and 2
                 lp_frag_address = self.weight._hp_mapping.lp_fragment_address
                 start, numel = lp_frag_address.start, lp_frag_address.numel

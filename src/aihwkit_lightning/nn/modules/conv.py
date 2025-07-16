@@ -584,6 +584,9 @@ class AnalogConv2d(_AnalogConvNd):
 
     def clip_weights(self) -> None:
         """Clip the weights."""
+
+        # pylint: disable=protected-access
+
         two_dim_weights = self.weight.view(self.out_channels, -1)
         clip_type = self.rpu_config.clip.type
         clip_sigma = self.rpu_config.clip.sigma
@@ -602,20 +605,38 @@ class AnalogConv2d(_AnalogConvNd):
             None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
         )
         if deepspeed:
-            hp_weight = safe_get_full_fp32_param(self.weight)
-            two_dim_hp_weight = hp_weight.view(self.out_channels, -1)
-            hp_sigma = clip_sigma * two_dim_hp_weight.std(
-                None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
-            )
+            if hasattr(self.weight, "ds_id"):
+                # stage 3
+                hp_weight = safe_get_full_fp32_param(self.weight)
+                two_dim_hp_weight = hp_weight.view(self.out_channels, -1)
+                hp_sigma = clip_sigma * two_dim_hp_weight.std(
+                    None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
+                )
         if clip_type in [WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL]:
             two_dim_weights.data.clamp_(-sigma_std, sigma_std)
-            if deepspeed:
+            did_clip = (two_dim_weights.abs() >= sigma_std).flatten()
+            clipped_weights = two_dim_weights.data.flatten()
+            if deepspeed and hasattr(self.weight, "ds_id"):
                 two_dim_hp_weight.data.clamp_(-hp_sigma, hp_sigma)
         else:
             raise ValueError(f"Unknown clip type {clip_type}")
         self.weight.data = two_dim_weights.view_as(self.weight)
         if deepspeed:
             safe_set_full_fp32_param(self.weight, hp_weight.view_as(self.weight))
+        if deepspeed:
+            if hasattr(self.weight, "ds_id"):
+                # stage 3
+                safe_set_full_fp32_param(self.weight, hp_weight.view_as(self.weight))
+            elif hasattr(self.weight, "_hp_mapping") and self.weight._hp_mapping is not None:
+                # stage 1 and 2
+                lp_frag_address = self.weight._hp_mapping.lp_fragment_address
+                start, numel = lp_frag_address.start, lp_frag_address.numel
+                clipped_weights_frag = clipped_weights[start : start + numel]
+                hp_frag = self.weight._hp_mapping.get_hp_fragment(None)
+                did_clip_frag = did_clip[start : start + numel].to(device=hp_frag.device)
+                hp_frag[did_clip_frag] = clipped_weights_frag[did_clip_frag].to(
+                    device=hp_frag.device, dtype=hp_frag.dtype
+                )
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
