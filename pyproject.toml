@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 requires-python = ">= 3.8"
@@ -16,7 +17,12 @@ maintainers = [
 description = "IBM Analog Hardware Acceleration Kit - Lightning"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENCSE.TXT"]
+license-files = ["LICENSE.txt"]
+dependencies = [
+    "torch>=1.10.0",
+    "typing_extensions>=4.0.0",
+    "tqdm",
+]
 keywords = [
     "ai",
     "analog",
@@ -32,9 +38,29 @@ keywords = [
     "non-volatile memory",
     "phase-change material"
 ]
+[project.optional-dependencies]
+dev = [
+    "mypy==1.8.0",
+    "pylint==2.15.7",
+    "pycodestyle==2.11.1",
+    "black==24.3.0",
+    "pytest",
+]
+huggingface = [
+    "transformers>=4.20.0",
+    "datasets",
+]
+triton = [
+    "triton>=2.0.0",
+]
+
 [project.urls]
 Paper = "https://openreview.net/forum?id=QNdxOgGmhR"
 Documentation = "https://aihwkit-lightning.readthedocs.io/en/latest/"
 Repository = "https://github.com/IBM/aihwkit-lightning"
 Issues = "https://github.com/IBM/aihwkit-lightning/issues"
 Changelog = "https://github.com/IBM/aihwkit-lightning/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
