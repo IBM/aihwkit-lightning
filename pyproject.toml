@@ -64,3 +64,7 @@ Changelog = "https://github.com/IBM/aihwkit-lightning/blob/main/CHANGELOG.md"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.mypy]
+ignore_missing_imports = true
+disable_error_code = ["operator", "index", "union-attr"]
+
