@@ -42,7 +42,7 @@ keywords = [
 dev = [
     "mypy==1.8.0",
     "pylint==2.15.7",
-    "pycodestyle==2.11.1",
+    "pycodestyle==2.14.0",
     "black==24.3.0",
     "pytest",
 ]
