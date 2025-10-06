@@ -41,7 +41,7 @@ keywords = [
 [project.optional-dependencies]
 dev = [
     "mypy==1.8.0",
-    "pylint==2.15.7",
+    "pylint==3.3.9",
     "pycodestyle==2.11.1",
     "black==24.3.0",
     "pytest",
