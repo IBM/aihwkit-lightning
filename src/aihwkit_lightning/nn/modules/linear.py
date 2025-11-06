@@ -89,7 +89,8 @@ class AnalogLinear(Linear, AnalogLayerBase):
         self.init_learnable_weight_ranges(
             init_value=sliced_abs_max(
                 upper_end_of_slices=self.upper_end_of_slices, weights=self.weight
-            ),
+            ) if self.rpu_config.clip == WeightClipType.LEARNABLE_PER_CHANNEL
+            else None,
             device=device,
             dtype=dtype,
         )
@@ -241,7 +242,8 @@ class AnalogLinear(Linear, AnalogLayerBase):
         self.init_learnable_weight_ranges(
             init_value=sliced_abs_max(
                 upper_end_of_slices=self.upper_end_of_slices, weights=self.weight
-            ),
+            ) if self.rpu_config.clip == WeightClipType.LEARNABLE_PER_CHANNEL
+            else None,
             device=weight.device,
             dtype=weight.dtype,
         )

@@ -124,7 +124,8 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             init_value=sliced_abs_max(
                 upper_end_of_slices=self.upper_end_of_slices,
                 weights=self.weight.view(self.out_channels, -1),
-            ),
+            ) if self.rpu_config.clip == WeightClipType.LEARNABLE_PER_CHANNEL
+            else None,
             device=device,
             dtype=dtype,
         )
@@ -175,6 +176,15 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
             self.weight.shape == weight.shape
         ), f"weight shape mismatch. Got {weight.shape}, expected {self.weight.shape}"
         self.weight.data = weight.detach().clone()
+        self.init_learnable_weight_ranges(
+            init_value=sliced_abs_max(
+                upper_end_of_slices=self.upper_end_of_slices,
+                weights=self.weight.view(self.out_channels, -1),
+            ) if self.rpu_config.clip == WeightClipType.LEARNABLE_PER_CHANNEL
+            else None,
+            device=weight.device,
+            dtype=weight.dtype,
+        )
 
     def set_weights_and_biases(self, weight: Tensor, bias: Optional[Tensor] = None) -> None:
         """Set the weight (and bias) tensors to the analog crossbar. Creates a copy of the tensors.
