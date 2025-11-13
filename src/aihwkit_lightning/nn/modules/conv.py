@@ -14,7 +14,7 @@
 
 # pylint: disable=too-many-arguments, too-many-locals, too-many-instance-attributes
 
-from typing import Optional, Tuple, Union, List
+from typing import Optional, Tuple, Union, List, Literal
 import os
 from copy import deepcopy
 from functools import reduce
@@ -70,7 +70,7 @@ class _AnalogConvNd(AnalogLayerBase, _ConvNd):
         output_padding: Tuple[int, ...],
         groups: int,
         bias: bool,
-        padding_mode: str,
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
@@ -336,7 +336,7 @@ class AnalogConv1d(_AnalogConvNd):
         dilation: Union[int, Tuple[int]] = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
@@ -493,7 +493,7 @@ class AnalogConv2d(_AnalogConvNd):
         dilation: Union[int, Tuple] = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
         rpu_config: Optional[TorchInferenceRPUConfig] = None,
