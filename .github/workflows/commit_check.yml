@@ -135,10 +135,12 @@ jobs:
         cd triton
         git checkout c1ed673b74e1c9aa69416459a4ae9f4fcf8cc6da
         pwd
-        pip install setuptools==60.0.0
+        # pip install setuptools==60.0.0
         pip install -r python/requirements.txt --no-deps
-        MAX_JOBS=8 pip install -v -e . --no-build-isolation
-        cd ..
+        cd python
+        MAX_JOBS=8 pip install -v -e . 
+        cd ../..
+        python -c "import triton ; print(f'Triton imported successfully from {triton.__file__}')"
 
         # aihwkit
         pwd
