@@ -12,8 +12,6 @@ jobs:
       fail-fast: false
 
     steps:
-    steps:
-
     - name: Free Disk Space (Ubuntu)
       uses: jlumbroso/free-disk-space@main
       with:
