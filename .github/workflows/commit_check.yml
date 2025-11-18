@@ -144,7 +144,9 @@ jobs:
         which python  # conda
         which pip
 
-        TMPDIR=/dev/root/tmp pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        mkdir $HOME/tmp
+        echo "Created tmp dir at $HOME/tmp"
+        TMPDIR=$HOME/tmp pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
         
         # triton
         git clone https://github.com/triton-lang/triton.git
@@ -153,7 +155,7 @@ jobs:
         pwd
         pip install -r python/requirements.txt --no-deps
         cd python
-        MAX_JOBS=8 TMPDIR=/dev/root/tmp pip install -v -e . 
+        MAX_JOBS=8 TMPDIR=$HOME/tmp pip install -v -e . 
         cd ../..
         python -c "import triton ; print(f'Triton imported successfully from {triton.__file__}')"
 
