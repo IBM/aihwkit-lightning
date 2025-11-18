@@ -19,9 +19,9 @@ import os
 from copy import deepcopy
 from functools import reduce
 from torch import Tensor, cuda, no_grad, tensor, int32
-from torch.nn.functional import unfold
-from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d
-from torch.nn.modules.utils import _single, _pair
+from torch.nn.functional import unfold, pad as torch_pad
+from torch.nn.modules.conv import _ConvNd, Conv1d, Conv2d, Conv3d
+from torch.nn.modules.utils import _single, _pair, _triple
 
 from .base import AnalogLayerBase
 from .torch_utils.quant_utils import clip_and_quantize
@@ -37,6 +37,76 @@ def is_at_least_volta_gpu():
         if gpu_properties.major >= 7:
             return True
     return False
+
+
+def unfold3d(
+    inp: Tensor,
+    kernel_size: Tuple[int, int, int],
+    padding: Tuple[int, int, int],
+    stride: Tuple[int, int, int],
+    dilation: Tuple[int, int, int],
+) -> Tensor:
+    """Unfold a 5D tensor for 3D convolution using sequential unfold operations.
+
+    This implements the approach from:
+    https://discuss.pytorch.org/t/manual-implementation-of-unrolled-3d-convolutions/91021/4
+
+    Args:
+        inp: Input tensor of shape (B, C, D, H, W) or (C, D, H, W)
+        kernel_size: 3D kernel size (kD, kH, kW)
+        padding: 3D padding (pD, pH, pW)
+        stride: 3D stride (sD, sH, sW)
+        dilation: 3D dilation (dD, dH, dW)
+
+    Returns:
+        Unfolded tensor of shape (B, C * kD * kH * kW, num_patches) or
+        (C * kD * kH * kW, num_patches) for unbatched input
+    """
+    # Handle unbatched input by adding batch dimension
+    if inp.dim() == 4:
+        inp = inp.unsqueeze(0)
+        unbatched = True
+    else:
+        unbatched = False
+
+    batch_size, in_channels, depth, height, width = inp.shape
+
+    # Apply padding: F.pad expects (left, right, top, bottom, front, back)
+    # padding is (pD, pH, pW), so we need (pW, pW, pH, pH, pD, pD)
+    inp_padded = torch_pad(
+        inp, (padding[2], padding[2], padding[1], padding[1], padding[0], padding[0])
+    )
+
+    # Adjust kernel sizes for dilation
+    effective_kernel_size = tuple(dilation[i] * (kernel_size[i] - 1) + 1 for i in range(3))
+
+    # Unfold across all three spatial dimensions sequentially
+    # Start with depth (dimension 2)
+    unfolded = inp_padded.unfold(2, size=kernel_size[0], step=stride[0])
+    # Then height (dimension 3, after first unfold)
+    unfolded = unfolded.unfold(3, size=kernel_size[1], step=stride[1])
+    # Finally width (dimension 4, after second unfold)
+    unfolded = unfolded.unfold(4, size=kernel_size[2], step=stride[2])
+
+    # After unfolding, shape is: (B, C, nD, nH, nW, kD, kH, kW)
+    # where n* are the output spatial dimensions
+
+    # Permute to get: (B, nD, nH, nW, C, kD, kH, kW)
+    unfolded = unfolded.permute(0, 2, 3, 4, 1, 5, 6, 7)
+
+    # Reshape to: (B, nD * nH * nW, C * kD * kH * kW)
+    num_patches = unfolded.size(1) * unfolded.size(2) * unfolded.size(3)
+    kernel_numel = in_channels * kernel_size[0] * kernel_size[1] * kernel_size[2]
+    unfolded = unfolded.reshape(batch_size, num_patches, kernel_numel)
+
+    # Transpose to: (B, C * kD * kH * kW, nD * nH * nW)
+    unfolded = unfolded.transpose(1, 2).contiguous()
+
+    # Remove batch dimension if input was unbatched
+    if unbatched:
+        unfolded = unfolded.squeeze(0)
+
+    return unfolded
 
 
 TRITON_AVAIL = False
@@ -563,6 +633,270 @@ class AnalogConv2d(_AnalogConvNd):
             as the analog version.
         """
         digital_layer = Conv2d(
+            module.in_channels,
+            module.out_channels,
+            module.kernel_size,  # type: ignore
+            module.stride,  # type: ignore
+            module.padding,  # type: ignore
+            module.dilation,  # type: ignore
+            module.groups,
+            module.bias is not None,
+            module.padding_mode,
+        )
+        digital_layer.weight.data = module.weight.data.detach().clone()
+        if module.bias is not None:
+            assert digital_layer.bias is not None, "Bias must be present"
+            digital_layer.bias.data = module.bias.data.detach().clone()
+        return digital_layer.to(device=module.weight.device, dtype=module.weight.dtype)
+
+    def clip_weights(self) -> None:
+        """Clip the weights."""
+        two_dim_weights = self.weight.view(self.out_channels, -1)
+        clip_type = self.rpu_config.clip.type
+        clip_sigma = self.rpu_config.clip.sigma
+
+        if clip_type in [WeightClipType.NONE, WeightClipType.LEARNABLE_PER_CHANNEL]:
+            return
+        assert clip_sigma > 0, "Clip sigma must be greater than 0"
+        sigma_std = clip_sigma * two_dim_weights.std(
+            None if clip_type == WeightClipType.LAYER_GAUSSIAN else 1, keepdim=True
+        )
+        if clip_type in [WeightClipType.LAYER_GAUSSIAN, WeightClipType.LAYER_GAUSSIAN_PER_CHANNEL]:
+            two_dim_weights.data.clamp_(-sigma_std, sigma_std)
+        else:
+            raise ValueError(f"Unknown clip type {clip_type}")
+        self.weight.data = two_dim_weights.view_as(self.weight)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        # pylint: disable=protected-access
+        destination._metadata[prefix.split(".")[0]]["rpu_config"] = deepcopy(self.rpu_config)
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
+        if "rpu_config" in local_metadata:
+            self.rpu_config = deepcopy(local_metadata["rpu_config"])
+
+
+class AnalogConv3d(_AnalogConvNd):
+    """3D convolution layer that uses an analog tile.
+
+    Applies a 3D convolution over an input signal composed of several input
+    planes, using an analog tile for its forward, backward and update passes.
+
+    Note:
+        The tensor parameters of this layer (``.weight`` and ``.bias``) are not
+        guaranteed to contain the same values as the internal weights and biases
+        stored in the analog tile. Please use ``set_weights`` and
+        ``get_weights`` when attempting to read or modify the weight/bias. This
+        read/write process can simulate the (noisy and inexact) analog writing
+        and reading of the resistive elements.
+
+    Args:
+        in_channels: number of channels in the input image.
+        out_channels: number of channels produced by the convolution.
+        kernel_size: size of the convolving kernel.
+        stride: stride of the convolution.
+        padding: zero-padding added to both sides of the input.
+        dilation: spacing between kernel elements.
+        groups: number of blocked connections from input channels to output
+            channels.
+        bias: whether to use a bias row on the analog tile or not.
+        padding_mode: padding strategy. Only ``'zeros'`` is supported.
+        rpu_config: resistive processing unit configuration.
+        tile_module_class: Class for the tile module (default
+            will be specified from the ``RPUConfig``).
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple],
+        stride: Union[int, Tuple] = 1,
+        padding: Union[int, Tuple] = 0,
+        dilation: Union[int, Tuple] = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
+        device=None,
+        dtype=None,
+        rpu_config: Optional[TorchInferenceRPUConfig] = None,
+    ):
+        kernel_size = _triple(kernel_size)
+        stride = _triple(stride)
+        padding = _triple(padding)
+        dilation = _triple(dilation)
+
+        super().__init__(
+            in_channels,
+            out_channels,
+            kernel_size,  # type: ignore
+            stride,  # type: ignore
+            padding,  # type: ignore
+            dilation,  # type: ignore
+            False,
+            _triple(0),
+            groups,
+            bias,
+            padding_mode,
+            device,
+            dtype,
+            rpu_config,
+        )
+
+    def forward(self, inp: Tensor) -> Tensor:
+        """Compute the forward pass for 3D convolution.
+
+        This overrides the base class forward to use unfold3d instead of unfold.
+        """
+        modified_weights = self.weight
+
+        apply_out_quantization = self.rpu_config.forward.out_res > 0
+        if apply_out_quantization:
+            assert self.rpu_config.forward.out_bound > 0, "Out quant. without a bound."
+            assert self.rpu_config.pre_post.input_range.enable, "Out quant. without IR."
+
+        if self.rpu_config.clip.type == WeightClipType.LEARNABLE_PER_CHANNEL:
+            assert (
+                self.learnable_weight_clip is not None
+            ), "Learnable weight clipping tensor not initialized."
+            assert self.learnable_weight_clip.size(0) == len(self.upper_end_of_slices), (
+                "Learnable weight clipping tensor must have the same number of rows as slices"
+                " you have for the weight matrix."
+            )
+
+        im_shape = inp.shape
+        assert isinstance(self.padding, tuple), "Padding must be a tuple"
+        assert isinstance(self.kernel_size, tuple), "Kernel size must be a tuple"
+        assert isinstance(self.stride, tuple), "Stride must be a tuple"
+        assert isinstance(self.dilation, tuple), "Dilation must be a tuple"
+
+        # Use unfold3d for 3D convolution
+        inp_ = unfold3d(
+            inp,
+            kernel_size=self.kernel_size,
+            padding=self.padding,
+            stride=self.stride,
+            dilation=self.dilation,
+        )
+
+        # Handle unbatched input
+        if inp_.dim() == 2:
+            inp_ = inp_.unsqueeze(0)
+            unbatched = True
+        else:
+            unbatched = False
+
+        # Transpose to match expected format: (B, num_patches, kernel_size)
+        inp_ = inp_.transpose(-1, -2).contiguous()
+
+        modified_weights = modified_weights.view(self.out_channels, -1)
+        triton_enabled = os.environ.get("AIHWKIT_USE_TRITON", False)
+        if TRITON_AVAIL and triton_enabled:
+            self.upper_end_of_slices = self.upper_end_of_slices.to(device=modified_weights.device)
+            out = TritonLinear.apply(
+                inp_,
+                modified_weights,
+                self.input_range,
+                self.input_range_update_idx,
+                self.upper_end_of_slices,
+                self.rpu_config,
+                self.training,
+            )
+            out = out + self.bias if self.bias is not None else out
+        else:
+            out = TorchLinear.linear(
+                inp=inp_,
+                weights=modified_weights,
+                bias=self.bias,
+                input_range=self.input_range,
+                input_range_update_idx=self.input_range_update_idx,
+                x_min=self.x_min,
+                x_max=self.x_max,
+                learnable_weight_clip=self.learnable_weight_clip,
+                in_sizes=self.in_sizes,
+                training=self.training,
+                rpu_config=self.rpu_config,
+                apply_out_quantization=apply_out_quantization,
+            )
+
+        out = out.transpose(-1, -2).contiguous()
+
+        # Calculate output spatial dimensions
+        def calc_output_size(input_size, padding, dilation, kernel_size, stride):
+            return (input_size + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
+
+        if len(im_shape) == 4:
+            # Unbatched input: (C, D, H, W)
+            depth, height, width = im_shape[1], im_shape[2], im_shape[3]
+        else:
+            # Batched input: (B, C, D, H, W)
+            depth, height, width = im_shape[2], im_shape[3], im_shape[4]
+
+        out_depth = calc_output_size(
+            depth, self.padding[0], self.dilation[0], self.kernel_size[0], self.stride[0]
+        )
+        out_height = calc_output_size(
+            height, self.padding[1], self.dilation[1], self.kernel_size[1], self.stride[1]
+        )
+        out_width = calc_output_size(
+            width, self.padding[2], self.dilation[2], self.kernel_size[2], self.stride[2]
+        )
+
+        if unbatched or len(im_shape) == 4:
+            # Unbatched output: (C_out, D_out, H_out, W_out)
+            return out.view(self.out_channels, out_depth, out_height, out_width)
+        else:
+            # Batched output: (B, C_out, D_out, H_out, W_out)
+            return out.view(im_shape[0], self.out_channels, out_depth, out_height, out_width)
+
+    @classmethod
+    def from_digital(cls, module: Conv3d, rpu_config: TorchInferenceRPUConfig) -> "AnalogConv3d":
+        """Return an AnalogConv3d layer from a torch Conv3d layer.
+
+        Args:
+            module: The torch module to convert. All layers that are
+                defined in the ``conversion_map``.
+            rpu_config: RPU config to use.
+
+        Returns:
+            an AnalogConv3d layer based on the digital Conv3d ``module``.
+        """
+        analog_layer = cls(
+            module.in_channels,
+            module.out_channels,
+            module.kernel_size,
+            module.stride,  # type: ignore
+            module.padding,  # type: ignore
+            module.dilation,  # type: ignore
+            module.groups,  # type: ignore
+            module.bias is not None,
+            module.padding_mode,
+            None,
+            None,
+            rpu_config,
+        )
+
+        analog_layer.set_weights_and_biases(module.weight, module.bias)
+        return analog_layer.to(device=module.weight.device, dtype=module.weight.dtype)
+
+    @classmethod
+    def to_digital(cls, module: "AnalogConv3d") -> Conv3d:
+        """Return an nn.Conv3d layer from an AnalogConv3d layer.
+
+        Args:
+            module: The analog module to convert.
+
+        Returns:
+            a torch Conv3d layer with the same dimension and weights
+            as the analog version.
+        """
+        digital_layer = Conv3d(
             module.in_channels,
             module.out_channels,
             module.kernel_size,  # type: ignore
