@@ -106,6 +106,9 @@ jobs:
         # Verify installation
         conda --version
 
+        # Delete .sh file
+        rm miniconda.sh
+
     - name: Create conda environment
       run: |
         export PATH="$HOME/miniconda/bin:$PATH"
@@ -129,7 +132,11 @@ jobs:
         which pip
 
         pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-        
+
+        # Check disk space before triton installation
+        echo "=== Disk space before triton installation ==="
+        df -h
+
         # triton
         git clone https://github.com/triton-lang/triton.git
         cd triton
@@ -137,14 +144,31 @@ jobs:
         pwd
         pip install -r python/requirements.txt --no-deps
         cd python
-        MAX_JOBS=8 pip install -v -e . 
+        MAX_JOBS=8 pip install -v -e .
         cd ../..
         python -c "import triton ; print(f'Triton imported successfully from {triton.__file__}')"
+
+        # Check disk space after triton installation
+        echo "=== Disk space after triton installation ==="
+        df -h
+
+        # Clean up triton build artifacts and temp files
+        echo "=== Cleaning up triton build artifacts ==="
+        rm -rf triton
+
+        # Clean up tmp directory
+        echo "=== Cleaning up /tmp directory ==="
+        sudo rm -rf /tmp/*
+
+        # Check disk space after cleanup
+        echo "=== Disk space after cleanup ==="
+        df -h
 
         # aihwkit
         pwd
         git clone https://github.com/IBM/aihwkit.git
         cd aihwkit
+        git checkout ee8bbf066f1c2a38b4a50f60c357a5581b33e916
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
         conda install -c conda-forge openblas -y

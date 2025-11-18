@@ -12,6 +12,7 @@
 
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
 # pylint: disable=too-many-arguments, too-many-branches, too-many-statements
+# pylint: disable=too-many-lines
 """Test the forward/backward correctness of our CPU/CUDA version to AIHWKIT."""
 
 import os
@@ -38,6 +39,7 @@ from torch.optim import AdamW
 
 from aihwkit.nn import AnalogLinear as AIHWKITAnalogLinear
 from aihwkit.nn import AnalogConv2d as AIWHKITAnalogConv2d
+from aihwkit.nn import AnalogConv3d as AIWHKITAnalogConv3d
 from aihwkit.nn.modules.rnn.rnn import AnalogRNN as AIHWKITAnalogRNN
 from aihwkit.nn.modules.rnn.cells import (
     AnalogVanillaRNNCell as AIHWKITAnalogVanillaRNNCell,
@@ -46,10 +48,11 @@ from aihwkit.nn.modules.rnn.cells import (
     AnalogGRUCell as AIHWKITAnalogGRUCell,
 )
 from aihwkit.simulator.configs import TorchInferenceRPUConfig as AIHWKITRPUConfig
+from aihwkit.simulator.configs import InferenceRPUConfig as CUDAAIHWKITRPUConfig
 from aihwkit.simulator.configs import NoiseManagementType, BoundManagementType
 from aihwkit.simulator.configs import WeightModifierType as AIHWKITWeightModifierType
 
-from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d
+from aihwkit_lightning.nn import AnalogLinear, AnalogConv2d, AnalogConv3d
 from aihwkit_lightning.nn.modules.rnn.rnn import AnalogRNN
 from aihwkit_lightning.nn.modules.rnn.cells import (
     AnalogVanillaRNNCell,
@@ -425,6 +428,191 @@ def test_conv2d_to_and_from_digital(
     out_re_analog = re_analog_conv2d(inp)  # pylint: disable=not-callable
     atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
     assert allclose(out_orig, out_re_analog, atol=atol)
+
+
+@mark.parametrize("depth", [4, 17])
+@mark.parametrize("height", [4, 17])
+@mark.parametrize("width", [4, 17])
+@mark.parametrize("in_channels", [3, 10])
+@mark.parametrize("out_channels", [3, 10])
+@mark.parametrize("kernel_size", [[3, 3, 3]], ids=str)
+@mark.parametrize("stride", [[1, 1, 1]], ids=str)
+@mark.parametrize("padding", [[1, 1, 1]], ids=str)
+@mark.parametrize("dilation", [[1, 1, 1]], ids=str)
+@mark.parametrize("groups", [1])
+@mark.parametrize("bias", [True])
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32, float16, bfloat16], ids=str)
+def test_conv3d_to_and_from_digital(
+    depth: int,
+    height: int,
+    width: int,
+    in_channels: int,
+    out_channels: int,
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
+    bias: bool,
+    device: torch_device,
+    dtype: torch_dtype,
+):
+    """Test the Conv3D to_digital and from_digital conversion."""
+
+    if groups > 1:
+        raise SkipTest("AIHWKIT currently does not support groups > 1")
+
+    if device == "cpu" and dtype != float32:
+        raise SkipTest("Skipping non-float32 tests for CPU")
+
+    rpu = RPUConfig()
+    analog_conv3d = AnalogConv3d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+        bias=bias,
+        rpu_config=rpu,
+        device=device,
+        dtype=dtype,
+    )
+
+    digital_conv3d = AnalogConv3d.to_digital(analog_conv3d)
+    re_analog_conv3d = AnalogConv3d.from_digital(digital_conv3d, rpu_config=rpu)
+    inp = randn(in_channels, depth, height, width, device=device, dtype=dtype)
+    out_orig = analog_conv3d(inp)
+    out_re_analog = re_analog_conv3d(inp)  # pylint: disable=not-callable
+    atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
+    assert allclose(out_orig, out_re_analog, atol=atol)
+
+
+@mark.parametrize("bsz", [1, 10])
+@mark.parametrize("num_inp_dims", [1, 2])
+@mark.parametrize("depth", [4, 17])
+@mark.parametrize("height", [4, 17])
+@mark.parametrize("width", [4, 17])
+@mark.parametrize("in_channels", [3])
+@mark.parametrize("out_channels", [3])
+@mark.parametrize("kernel_size", [[3, 3, 3]], ids=str)
+@mark.parametrize("stride", [[1, 1, 1]], ids=str)
+@mark.parametrize("padding", [[1, 1, 1]], ids=str)
+@mark.parametrize("dilation", [[1, 1, 1]], ids=str)
+@mark.parametrize("groups", [1])
+@mark.parametrize("bias", [True, False])
+@mark.parametrize("max_inp_size", [0], indirect=True)
+@mark.parametrize("ir_enable_inp_res", [(False, -1), (True, 2**7 - 2)], ids=str, indirect=True)
+@mark.parametrize("ir_dynamic", [False], indirect=True)
+@mark.parametrize("ir_learn_input_range", [False], indirect=True)
+@mark.parametrize("ir_init_value", [3.0], indirect=True)
+@mark.parametrize("ir_init_from_data", [0], indirect=True)
+@mark.parametrize("ir_init_std_alpha", [3.0], indirect=True)
+@mark.parametrize("adc_config", [(-1, -1)], ids=str, indirect=True)
+@mark.parametrize("device", ["cpu"] if SKIP_CUDA_TESTS else ["cpu", "cuda"])
+@mark.parametrize("dtype", [float32], ids=str)
+def test_conv3d_forward(
+    bsz: int,
+    num_inp_dims: int,
+    depth: int,
+    height: int,
+    width: int,
+    in_channels: int,
+    out_channels: int,
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    groups: int,
+    bias: bool,
+    device: torch_device,
+    dtype: torch_dtype,
+    rpus,
+):
+    """Test the Conv3D forward pass."""
+
+    manual_seed(0)
+
+    if groups > 1:
+        raise SkipTest("AIHWKIT currently does not support groups > 1")
+
+    if num_inp_dims == 1:
+        raise SkipTest("AIHWKIT has a bug with 1D inputs in Conv layers")
+
+    _, rpu = rpus
+
+    # AIHWKIT Conv3D requires InferenceRPUConfig (CUDA tile)
+    # Create a new config matching the test parameters
+    aihwkit_rpu = CUDAAIHWKITRPUConfig()
+    aihwkit_rpu.mapping.max_output_size = 0
+    aihwkit_rpu.mapping.max_input_size = 0
+    aihwkit_rpu.forward.inp_res = rpu.forward.inp_res
+    aihwkit_rpu.forward.out_res = rpu.forward.out_res
+    aihwkit_rpu.forward.out_bound = rpu.forward.out_bound
+    aihwkit_rpu.forward.out_noise = rpu.forward.out_noise
+    aihwkit_rpu.forward.noise_management = (
+        NoiseManagementType.ABS_MAX
+        if rpu.pre_post.input_range.dynamic
+        else NoiseManagementType.NONE
+    )
+    aihwkit_rpu.forward.bound_management = BoundManagementType.NONE
+    aihwkit_rpu.pre_post.input_range.enable = rpu.pre_post.input_range.enable
+    aihwkit_rpu.pre_post.input_range.learn_input_range = rpu.pre_post.input_range.learn_input_range
+    aihwkit_rpu.pre_post.input_range.init_value = rpu.pre_post.input_range.init_value
+    aihwkit_rpu.pre_post.input_range.init_from_data = rpu.pre_post.input_range.init_from_data
+    aihwkit_rpu.pre_post.input_range.init_std_alpha = rpu.pre_post.input_range.init_std_alpha
+    if not rpu.pre_post.input_range.enable:
+        aihwkit_rpu.forward.inp_bound = -1
+
+    aihwkit_analog_conv3d = AIWHKITAnalogConv3d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+        bias=bias,
+        rpu_config=aihwkit_rpu,
+    )
+
+    analog_conv3d = AnalogConv3d(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+        bias=bias,
+        rpu_config=rpu,
+        device=device,
+        dtype=dtype,
+    )
+
+    aihwkit_analog_conv3d = aihwkit_analog_conv3d.eval()
+    analog_conv3d = analog_conv3d.eval()
+
+    aihwkit_analog_conv3d = aihwkit_analog_conv3d.to(device=device, dtype=dtype)
+
+    if num_inp_dims == 1:
+        inp = randn(in_channels, depth, height, width, device=device, dtype=dtype)
+    else:
+        inp = randn(bsz, in_channels, depth, height, width, device=device, dtype=dtype)
+
+    digital_aihwkit_conv3d = AIWHKITAnalogConv3d.to_digital(aihwkit_analog_conv3d)
+    conv_weight = digital_aihwkit_conv3d.weight.to(device=device, dtype=dtype)
+    conv_bias = digital_aihwkit_conv3d.bias
+    conv_bias = conv_bias.to(device=device, dtype=dtype) if conv_bias is not None else None
+    analog_conv3d.set_weights_and_biases(conv_weight, conv_bias)
+    analog_conv3d = analog_conv3d.to(device=device, dtype=dtype)
+
+    out_aihwkit = aihwkit_analog_conv3d(inp)  # pylint: disable=not-callable
+    out = analog_conv3d(inp)  # pylint: disable=not-callable
+    atol = 1e-4 if dtype in [float16, bfloat16] else 1e-5
+    assert allclose(out_aihwkit, out, atol=atol)
 
 
 # Don't run tests where dropout > 0.0 but num_layers == 1
