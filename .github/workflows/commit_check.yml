@@ -53,22 +53,6 @@ jobs:
       with:
         python-version: '3.14.0'
 
-    - name: Free Disk Space (Ubuntu)
-      uses: jlumbroso/free-disk-space@main
-      with:
-        # this might remove tools that are actually needed,
-        # if set to "true" but frees about 6 GB
-        tool-cache: false
-
-        # all of these default to true, but feel free to set to
-        # "false" if necessary for your workflow
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap-storage: true
-
     - name: Download and install Miniconda
       run: |
         # Check if we're running in act (local testing)
@@ -144,7 +128,7 @@ jobs:
         which python  # conda
         which pip
 
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        TMPDIR=/var/tmp pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
         
         # triton
         git clone https://github.com/triton-lang/triton.git
@@ -153,7 +137,7 @@ jobs:
         pwd
         pip install -r python/requirements.txt --no-deps
         cd python
-        MAX_JOBS=8 pip install -v -e . 
+        MAX_JOBS=8 TMPDIR=/var/tmp pip install -v -e . 
         cd ../..
         python -c "import triton ; print(f'Triton imported successfully from {triton.__file__}')"
 
