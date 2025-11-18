@@ -40,7 +40,7 @@ keywords = [
 ]
 [project.optional-dependencies]
 dev = [
-    "mypy==1.8.0",
+    "mypy==1.18.2",
     "pylint==2.15.7",
     "pycodestyle==2.11.1",
     "black==24.3.0",
