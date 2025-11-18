@@ -44,7 +44,6 @@ def unfold3d(
     kernel_size: Tuple[int, int, int],
     padding: Tuple[int, int, int],
     stride: Tuple[int, int, int],
-    dilation: Tuple[int, int, int],
 ) -> Tensor:
     """Unfold a 5D tensor for 3D convolution using sequential unfold operations.
 
@@ -56,7 +55,6 @@ def unfold3d(
         kernel_size: 3D kernel size (kD, kH, kW)
         padding: 3D padding (pD, pH, pW)
         stride: 3D stride (sD, sH, sW)
-        dilation: 3D dilation (dD, dH, dW)
 
     Returns:
         Unfolded tensor of shape (B, C * kD * kH * kW, num_patches) or
@@ -69,16 +67,13 @@ def unfold3d(
     else:
         unbatched = False
 
-    batch_size, in_channels, depth, height, width = inp.shape
+    batch_size, in_channels, _, _, _ = inp.shape
 
     # Apply padding: F.pad expects (left, right, top, bottom, front, back)
     # padding is (pD, pH, pW), so we need (pW, pW, pH, pH, pD, pD)
     inp_padded = torch_pad(
         inp, (padding[2], padding[2], padding[1], padding[1], padding[0], padding[0])
     )
-
-    # Adjust kernel sizes for dilation
-    effective_kernel_size = tuple(dilation[i] * (kernel_size[i] - 1) + 1 for i in range(3))
 
     # Unfold across all three spatial dimensions sequentially
     # Start with depth (dimension 2)
@@ -466,7 +461,7 @@ class AnalogConv1d(_AnalogConvNd):
             module.dilation,  # type: ignore
             module.groups,
             module.bias is not None,
-            module.padding_mode,
+            module.padding_mode,  # type: ignore[arg-type]
             None,
             None,
             rpu_config,
@@ -612,7 +607,7 @@ class AnalogConv2d(_AnalogConvNd):
             module.dilation,  # type: ignore
             module.groups,  # type: ignore
             module.bias is not None,
-            module.padding_mode,
+            module.padding_mode,  # type: ignore[arg-type]
             None,
             None,
             rpu_config,
@@ -732,6 +727,8 @@ class AnalogConv3d(_AnalogConvNd):
         padding = _triple(padding)
         dilation = _triple(dilation)
 
+        assert dilation == (1, 1, 1), "Dilation must be 1."
+
         super().__init__(
             in_channels,
             out_channels,
@@ -779,10 +776,9 @@ class AnalogConv3d(_AnalogConvNd):
         # Use unfold3d for 3D convolution
         inp_ = unfold3d(
             inp,
-            kernel_size=self.kernel_size,
-            padding=self.padding,
-            stride=self.stride,
-            dilation=self.dilation,
+            kernel_size=self.kernel_size,  # type: ignore[arg-type]
+            padding=self.padding,  # type: ignore[arg-type]
+            stride=self.stride,  # type: ignore[arg-type]
         )
 
         # Handle unbatched input
@@ -851,9 +847,8 @@ class AnalogConv3d(_AnalogConvNd):
         if unbatched or len(im_shape) == 4:
             # Unbatched output: (C_out, D_out, H_out, W_out)
             return out.view(self.out_channels, out_depth, out_height, out_width)
-        else:
-            # Batched output: (B, C_out, D_out, H_out, W_out)
-            return out.view(im_shape[0], self.out_channels, out_depth, out_height, out_width)
+        # Batched output: (B, C_out, D_out, H_out, W_out)
+        return out.view(im_shape[0], self.out_channels, out_depth, out_height, out_width)
 
     @classmethod
     def from_digital(cls, module: Conv3d, rpu_config: TorchInferenceRPUConfig) -> "AnalogConv3d":
@@ -876,7 +871,7 @@ class AnalogConv3d(_AnalogConvNd):
             module.dilation,  # type: ignore
             module.groups,  # type: ignore
             module.bias is not None,
-            module.padding_mode,
+            module.padding_mode,  # type: ignore[arg-type]
             None,
             None,
             rpu_config,

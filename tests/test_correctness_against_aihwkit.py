@@ -12,6 +12,7 @@
 
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
 # pylint: disable=too-many-arguments, too-many-branches, too-many-statements
+# pylint: disable=too-many-lines
 """Test the forward/backward correctness of our CPU/CUDA version to AIHWKIT."""
 
 import os
