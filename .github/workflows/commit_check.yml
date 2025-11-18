@@ -12,6 +12,13 @@ jobs:
       fail-fast: false
 
     steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Get full git history
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.14.0'
     - name: Free Disk Space (Ubuntu)
       uses: jlumbroso/free-disk-space@main
       with:
@@ -27,13 +34,6 @@ jobs:
         large-packages: true
         docker-images: true
         swap-storage: true
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Get full git history
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.14.0'
     - name: Install package
       run: |
         pip install --upgrade pip
