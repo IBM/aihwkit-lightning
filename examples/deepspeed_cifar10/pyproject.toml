@@ -1,0 +1,17 @@
+[project]
+name = "deepspeed-cifar10-example"
+version = "0.1.0"
+description = "Example on how to use AIHWKIT-Lightning with DeepSpeed on CIFAR-10"
+requires-python = ">=3.9"
+dependencies = [
+    "torch",
+    "torchvision",
+    "deepspeed",
+    "aihwkit-lightning",
+]
+
+[tool.uv]
+dev-dependencies = []
+
+[tool.uv.sources]
+aihwkit-lightning = { path = "../..", editable = true }

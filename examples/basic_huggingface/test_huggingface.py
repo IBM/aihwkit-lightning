@@ -84,7 +84,6 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
 
         training_args = TrainingArguments(
             output_dir=temp_dir,
-            overwrite_output_dir=True,
             do_train=True,
             do_eval=True,
             eval_strategy="steps",
@@ -106,11 +105,10 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
             metric_for_best_model=metric_name,
             warmup_ratio=0.06,
             bf16=False,
-            report_to=None,
+            report_to="none",
             greater_is_better=True,
             fp16=use_fp16,
             fp16_full_eval=use_fp16,
-            half_precision_backend="apex",
             torch_compile=False,
         )
 
@@ -132,13 +130,13 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
             args=training_args,
             train_dataset=dataset["train"],
             eval_dataset=dataset[validation_key],
-            tokenizer=tokenizer,
+            processing_class=tokenizer,
             optimizers=(
                 (
                     AdamW(model.parameters(), lr=0.00001)
                     if use_normal_torch
                     else AnalogOptimizer(
-                        AdamW, model.analog_layers(), model.parameters(), lr=0.00001
+                        AdamW, model.analog_layers, model.parameters(), lr=0.00001
                     )
                 ),
                 None,
