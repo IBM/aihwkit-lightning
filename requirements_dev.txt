@@ -1,5 +1,5 @@
 mypy==1.8.0
-pylint==2.15.7
+pylint==4.0.5
 pycodestyle==2.11.1
 black==24.3.0
 transformers==4.50.0
