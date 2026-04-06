@@ -234,3 +234,5 @@ to 0 will not result in chunking. This is the default behavior.
 
     from aihwkit_lightning.nn.export import export_to_aihwkit
     aihwkit_model = export_to_aihwkit(model=analog_model, max_output_size=-1)
+
+A complete example is provided `here <https://github.com/IBM/aihwkit-lightning/tree/main/examples/aihwkit_evaluation>`_.
