@@ -17,7 +17,7 @@ import math
 from copy import deepcopy
 import re
 
-from typing import Any, List, Optional, Tuple, Type, Callable, Union
+from typing import Any, List, Optional, Tuple, Type, Callable, Union, cast
 from torch import Tensor, jit
 import torch
 from torch.nn import Dropout, ModuleList, init, Module, Linear, LSTM, GRU, RNN
@@ -34,6 +34,8 @@ from aihwkit_lightning.nn.modules.rnn.cells import (
 from aihwkit_lightning.nn.modules.rnn.layers import AnalogRNNLayer, AnalogBidirRNNLayer
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from .layers import AnalogRNNLayer, AnalogBidirRNNLayer
+
+AnalogRNNCell = Union[AnalogVanillaRNNCell, AnalogLSTMCell, AnalogGRUCell]
 
 
 class ModularRNN(Module):
@@ -387,10 +389,7 @@ class AnalogRNN(AnalogContainerBase, Module):
 
     @staticmethod
     def update_digital_attrs(
-        digital_layer: Union[RNN, LSTM, GRU],
-        analog_cell: Union[AnalogVanillaRNNCell, AnalogLSTMCell, AnalogGRUCell],
-        layer: int,
-        reverse: bool,
+        digital_layer: Union[RNN, LSTM, GRU], analog_cell: AnalogRNNCell, layer: int, reverse: bool
     ):
         """Update digital weights and (optionally) biases of RNN-type
         digital layers.
@@ -428,13 +427,16 @@ class AnalogRNN(AnalogContainerBase, Module):
             as the analog version. Type is dependent on underlying cell of
             AnalogRNN layer
         """
-        analog_cell = (
-            module.rnn.layers[0].cell
-            if not module.bidirectional
-            else module.rnn.layers[0].directions[0].cell  # type: ignore[index,union-attr]
+        analog_cell = cast(
+            AnalogRNNCell,
+            (
+                module.rnn.layers[0].cell
+                if not module.bidirectional
+                else module.rnn.layers[0].directions[0].cell  # type: ignore[index,union-attr]
+            ),
         )
-        device = analog_cell.weight_ih.weight.device
-        dtype = analog_cell.weight_ih.weight.dtype
+        device = cast(torch.device, analog_cell.weight_ih.weight.device)
+        dtype = cast(torch.dtype, analog_cell.weight_ih.weight.dtype)
         has_bias = analog_cell.weight_hh.bias is not None
         digital_cell: Union[RNN, LSTM, GRU]
         if isinstance(analog_cell, AnalogVanillaRNNCell):
@@ -477,21 +479,27 @@ class AnalogRNN(AnalogContainerBase, Module):
             )
         with torch.no_grad():
             for layer in range(module.num_layers):
-                layer_cell = (
-                    module.rnn.layers[layer].cell
-                    if not module.bidirectional
-                    else (
-                        module.rnn.layers[layer]
-                        .directions[0]  # type: ignore[index,union-attr]
-                        .cell
-                    )
+                layer_cell = cast(
+                    AnalogRNNCell,
+                    (
+                        module.rnn.layers[layer].cell
+                        if not module.bidirectional
+                        else (
+                            module.rnn.layers[layer]
+                            .directions[0]  # type: ignore[index,union-attr]
+                            .cell
+                        )
+                    ),
                 )
                 module.update_digital_attrs(digital_cell, layer_cell, layer, False)
                 if module.bidirectional:
-                    layer_cell = (
-                        module.rnn.layers[layer]
-                        .directions[1]  # type: ignore[index,union-attr]
-                        .cell
+                    layer_cell = cast(
+                        AnalogRNNCell,
+                        (
+                            module.rnn.layers[layer]
+                            .directions[1]  # type: ignore[index,union-attr]
+                            .cell
+                        ),
                     )
                     module.update_digital_attrs(digital_cell, layer_cell, layer, True)
 
