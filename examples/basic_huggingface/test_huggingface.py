@@ -135,9 +135,7 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
                 (
                     AdamW(model.parameters(), lr=0.00001)
                     if use_normal_torch
-                    else AnalogOptimizer(
-                        AdamW, model.analog_layers, model.parameters(), lr=0.00001
-                    )
+                    else AnalogOptimizer(AdamW, model.analog_layers, model.parameters(), lr=0.00001)
                 ),
                 None,
             ),
