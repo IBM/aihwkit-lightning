@@ -1,7 +1,7 @@
 mypy==1.20.2
 pylint==2.15.7
 pycodestyle==2.11.1
-black==26.3.1
+black==26.5.0
 transformers==4.53.0
 datasets
 pytest>=9.0.3,<9.1
