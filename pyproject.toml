@@ -19,7 +19,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE.txt"]
 dependencies = [
-    "torch==2.13.0",
+    "torch==2.14.0",
     "typing_extensions>=4.0.0",
     "tqdm",
 ]
