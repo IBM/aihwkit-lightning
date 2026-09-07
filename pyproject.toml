@@ -38,6 +38,19 @@ keywords = [
     "non-volatile memory",
     "phase-change material"
 ]
+classifiers=[
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Environment :: GPU :: NVIDIA CUDA",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
 [project.optional-dependencies]
 dev = [
     "mypy==1.20.2",
