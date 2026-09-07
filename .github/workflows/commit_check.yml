@@ -131,7 +131,7 @@ jobs:
         which python  # conda
         which pip
 
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        pip install torch==2.13.0 torchvision==0.28.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu
 
         # Check disk space before triton installation
         echo "=== Disk space before triton installation ==="
