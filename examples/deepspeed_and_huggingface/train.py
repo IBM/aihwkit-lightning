@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# (C) Copyright 2024 IBM. All Rights Reserved.
+# (C) Copyright 2026 IBM. All Rights Reserved.
 #
-# This code is licensed under the Apache License, Version 2.0. You may
-# obtain a copy of this license in the LICENSE.txt file in the root directory
-# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# Any modifications or derivative works of this code must retain this
-# copyright notice, and modified files need to carry a notice indicating
-# that they have been altered from the originals.
+# Licensed under the MIT license. See LICENSE file in the project root for details.
 
 """Example on how to use AIHWKIT-Lightning in single or multi-node training setting."""
 
@@ -151,7 +145,7 @@ def main():
         seed=args.seed,
         metric_for_best_model=metric_name,
         load_best_model_at_end=args.load_best_model_at_end,
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=args.warmup_steps,
         bf16=False,
         bf16_full_eval=False,
         greater_is_better=args.greater_is_better,
