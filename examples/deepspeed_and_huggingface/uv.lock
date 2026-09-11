@@ -50,7 +50,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "torch", specifier = "==2.13.0" },
     { name = "tqdm" },
-    { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=4.20.0" },
+    { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=5.5.0" },
     { name = "triton", marker = "extra == 'triton'", specifier = ">=2.0.0" },
     { name = "typing-extensions", specifier = ">=4.0.0" },
 ]
