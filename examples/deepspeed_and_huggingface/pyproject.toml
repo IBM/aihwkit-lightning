@@ -2,7 +2,7 @@
 name = "deepspeed-huggingface-example"
 version = "0.1.0"
 description = "Example on how to use AIHWKIT-Lightning with DeepSpeed and HuggingFace"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "torch",
@@ -14,9 +14,6 @@ dependencies = [
     "pyyaml",
     "aihwkit-lightning",
 ]
-
-[tool.uv]
-dev-dependencies = []
 
 [tool.uv.sources]
 aihwkit-lightning = { path = "../..", editable = true }
