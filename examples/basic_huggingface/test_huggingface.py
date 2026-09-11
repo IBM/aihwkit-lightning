@@ -103,7 +103,7 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
             save_total_limit=1,
             seed=0,
             metric_for_best_model=metric_name,
-            warmup_ratio=0.06,
+            warmup_steps=0.06,  # float < 1 is a ratio of total steps (transformers v5)
             bf16=False,
             report_to="none",
             greater_is_better=True,

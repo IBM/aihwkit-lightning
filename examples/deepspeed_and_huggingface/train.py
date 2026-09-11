@@ -151,7 +151,7 @@ def main():
         seed=args.seed,
         metric_for_best_model=metric_name,
         load_best_model_at_end=args.load_best_model_at_end,
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=args.warmup_steps,  # float < 1 is a ratio of total steps (transformers v5)
         bf16=False,
         bf16_full_eval=False,
         greater_is_better=args.greater_is_better,
