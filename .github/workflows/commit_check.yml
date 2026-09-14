@@ -12,24 +12,22 @@ jobs:
       fail-fast: false
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0  # Get full git history
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.14.0'
     - name: Install package
       run: |
         pip install --upgrade pip
-        pip install -e .
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10.17'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements_dev.txt
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        pip install uv
+        uv venv --python 3.10.17
+        uv pip install -e ".[dev]" --torch-backend=auto
     - name: Pytest
       run: |
+        source .venv/bin/activate
         make pylint
         make pycodestyle
         make mypy
@@ -41,7 +39,7 @@ jobs:
       fail-fast: false
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0  # Get full git history
 
@@ -51,9 +49,9 @@ jobs:
         sudo apt-get install -y libopenblas-dev
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
-        python-version: '3.10.17'
+        python-version: '3.14.0'
 
     - name: Download and install Miniconda
       run: |
@@ -108,6 +106,9 @@ jobs:
         # Verify installation
         conda --version
 
+        # Delete .sh file
+        rm miniconda.sh
+
     - name: Create conda environment
       run: |
         export PATH="$HOME/miniconda/bin:$PATH"
@@ -130,19 +131,44 @@ jobs:
         which python  # conda
         which pip
 
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-        
+        pip install torch==2.13.0 torchvision==0.28.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu
+
+        # Check disk space before triton installation
+        echo "=== Disk space before triton installation ==="
+        df -h
+
         # triton
         git clone https://github.com/triton-lang/triton.git
         cd triton
-        pip install -r python/requirements.txt
+        git checkout c1ed673b74e1c9aa69416459a4ae9f4fcf8cc6da
+        pwd
+        pip install -r python/requirements.txt --no-deps
+        cd python
         MAX_JOBS=8 pip install -v -e .
-        cd ..
+        cd ../..
+        python -c "import triton ; print(f'Triton imported successfully from {triton.__file__}')"
+
+        # Check disk space after triton installation
+        echo "=== Disk space after triton installation ==="
+        df -h
+
+        # Clean up triton build artifacts and temp files
+        echo "=== Cleaning up triton build artifacts ==="
+        rm -rf triton
+
+        # Clean up tmp directory
+        echo "=== Cleaning up /tmp directory ==="
+        sudo rm -rf /tmp/*
+
+        # Check disk space after cleanup
+        echo "=== Disk space after cleanup ==="
+        df -h
 
         # aihwkit
         pwd
         git clone https://github.com/IBM/aihwkit.git
         cd aihwkit
+        git checkout ee8bbf066f1c2a38b4a50f60c357a5581b33e916
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
         conda install -c conda-forge openblas -y

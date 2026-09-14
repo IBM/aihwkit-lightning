@@ -1,8 +1,9 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
-requires-python = ">= 3.8"
+requires-python = ">= 3.10"
 name = "aihwkit_lightning"
 version = "2.0.1"
 authors = [
@@ -16,7 +17,12 @@ maintainers = [
 description = "IBM Analog Hardware Acceleration Kit - Lightning"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENCSE.TXT"]
+license-files = ["LICENSE.txt"]
+dependencies = [
+    "torch==2.13.0",
+    "typing_extensions>=4.0.0",
+    "tqdm",
+]
 keywords = [
     "ai",
     "analog",
@@ -32,9 +38,46 @@ keywords = [
     "non-volatile memory",
     "phase-change material"
 ]
+classifiers=[
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Environment :: GPU :: NVIDIA CUDA",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+[project.optional-dependencies]
+dev = [
+    "mypy==1.20.2",
+    "pylint==2.15.7",
+    "pycodestyle==2.11.1",
+    "black==26.5.1",
+    "pytest",
+]
+huggingface = [
+    "transformers>=4.20.0",
+    "datasets",
+]
+triton = [
+    "triton>=2.0.0",
+]
+
 [project.urls]
 Paper = "https://openreview.net/forum?id=QNdxOgGmhR"
 Documentation = "https://aihwkit-lightning.readthedocs.io/en/latest/"
 Repository = "https://github.com/IBM/aihwkit-lightning"
 Issues = "https://github.com/IBM/aihwkit-lightning/issues"
 Changelog = "https://github.com/IBM/aihwkit-lightning/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+ignore_missing_imports = true
+disable_error_code = ["operator", "index", "union-attr"]
+

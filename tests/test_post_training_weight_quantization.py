@@ -106,9 +106,7 @@ def test_post_training_weight_quantization(
     analog_model = convert_to_analog(model, rpu_config=rpu_config)
 
     # create an analog optimizer
-    optim = AnalogOptimizer(
-        AdamW, analog_model.analog_layers, analog_model.parameters(), lr=0.001
-    )
+    optim = AnalogOptimizer(AdamW, analog_model.analog_layers, analog_model.parameters(), lr=0.001)
     for _ in range(1):
         optim.zero_grad()
         out = analog_model(inp)

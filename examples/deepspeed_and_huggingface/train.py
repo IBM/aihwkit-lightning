@@ -127,12 +127,10 @@ def main():
 
     training_args = TrainingArguments(
         output_dir=args.example_directory,
-        overwrite_output_dir=args.overwrite_output_dir,
         do_train=args.do_train,
         do_eval=args.do_eval,
         eval_strategy=args.evaluation_strategy,
         save_strategy=args.save_strategy,
-        save_safetensors=False,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -177,7 +175,7 @@ def main():
             (
                 AdamW(model.parameters(), lr=lr)
                 if args.fp
-                else AnalogOptimizer(AdamW, model.analog_layers(), model.parameters(), lr=lr)
+                else AnalogOptimizer(AdamW, model.analog_layers, model.parameters(), lr=lr)
             ),
             None,
         )
@@ -188,7 +186,7 @@ def main():
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=lm_data_collator,
         optimizers=optimizers,
     )

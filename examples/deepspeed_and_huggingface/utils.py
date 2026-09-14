@@ -23,7 +23,7 @@ from aihwkit_lightning.simulator.parameters.enums import WeightNoiseInjectionTyp
 from aihwkit_lightning.exceptions import ArgumentError
 
 
-class CustomTrainer(Trainer):
+class CustomTrainer(Trainer):  # pylint: disable=too-few-public-methods
     """Custom trainer handling weight clipping."""
 
     # overwriting for clipping the weights
@@ -117,7 +117,7 @@ def create_rpu_config(args):
     return rpu_config
 
 
-class PrettySafeLoader(yaml.SafeLoader):
+class PrettySafeLoader(yaml.SafeLoader):  # pylint: disable=too-few-public-methods
     """Allows specifying tuples in yaml config."""
 
     def construct_python_tuple(self, node):
