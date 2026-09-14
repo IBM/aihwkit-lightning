@@ -12,7 +12,8 @@ authors = [
   {name = "Julian Buechel", email = "jub@zurich.ibm.com"},
 ]
 maintainers = [
-  {name = "Julian Buechel", email = "jub@zurich.ibm.com"}
+  {name = "Manuel Le Gallo-Bourdeau", email = "anu@zurich.ibm.com"},
+  {name = "Pablo Carmona Gonzalez", email = "Pablo.Gonzalez3@ibm.com"}
 ]
 description = "IBM Analog Hardware Acceleration Kit - Lightning"
 readme = "README.md"
