@@ -41,11 +41,12 @@ The format is based on [Keep a Changelog], and this project adheres to
   (#80).
 * Read the Docs build moved to an Ubuntu LTS image and a Python version that
   matches the minimum requirement (#81).
-* CI workflow: pinned Triton commit and `setuptools` version, pinned `torch`,
-  `torchvision` and `torchaudio` for GCC compatibility, and updated
-  `actions/checkout` (#64) and `actions/setup-python` (#65) to v7.
+* CI workflow runs on Python 3.14 (#21), pins the Triton commit and
+  `setuptools` version, pins `torch`, `torchvision` and `torchaudio` for GCC
+  compatibility (#68), and uses `actions/checkout` v7 (#64) and
+  `actions/setup-python` v7 (#65).
 * Type hints in the RNN module were tightened (`AnalogRNNCell` alias and
-  explicit casts) and the example optimizer selection was refactored.
+  explicit casts) to satisfy the newer `mypy` (#53).
 * Development tooling bumps via Renovate: `black` 26.5.1, `mypy` 1.20.2,
   `pycodestyle` 2.14.0, `pytest` 9.x, `Sphinx` 9, `sphinx-rtd-theme` 3,
   `myst-parser` 5 and `recommonmark` 0.7.1.
@@ -62,7 +63,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 * Refreshed `uv.lock` for the package and the examples to resolve Dependabot
   and Renovate vulnerability alerts (`transformers`, `black`, `pytest`,
   `gitpython`, `urllib3`, `pillow`, `setuptools`, `msgpack`, `accelerate`)
-  (#42, #43, #54, #55, #67, #72, #73, #74, #75, #76, #82, #83).
+  (#42, #43, #54, #55, #67, #72, #73, #74, #75, #76, #77, #82, #83).
 
 ## [2.0.1] - 2025-06-26
 
@@ -153,7 +154,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 ### Added
 * Analog layers `AnalogLinear`, `AnalogConv1d`, `AnalogConv2d`,
   `AnalogSequential` and `AnalogWrapper`, plus `AnalogRNN` with vanilla RNN,
-  LSTM and GRU cells (uni- and bidirectional) ported from AIHWKIT (#4, #13).
+  LSTM and GRU cells (uni- and bidirectional) ported from AIHWKIT (#13).
 * `convert_to_analog` / `convert_to_digital` model conversion and the
   `AnalogOptimizer` wrapper that clips weights after every optimizer step.
 * `TorchInferenceRPUConfig` covering: learnable input ranges with a fast
@@ -181,6 +182,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 ### Changed
 * License changed from Apache 2.0 to MIT (2024-09-06).
 * `move_to_meta` handled at the analog base layer level (#11).
+* Lower memory footprint of input range learning (in-place clamping) and
+  faster Triton kernels (output noise moved out of the inner loop).
 * HuggingFace example uses `eval_strategy`; `transformers` pinned for the
   tests because newer versions broke `mypy` and `pylint`.
 
@@ -190,10 +193,11 @@ The format is based on [Keep a Changelog], and this project adheres to
   for a zero resolution (#15).
 * Output bound handling and zero bounds in output quantization.
 * Gradients did not flow through the input range because of a `no_grad`
-  block; overflow-free in-place clamping for input range learning.
+  block.
 * Fast-mode input range learning bug and DeepSpeed example fix.
-* Per-column output noise, weight modifier reset and division by zero in the
-  Triton kernels.
+* Division by zero when modifying weights.
+* Per-column output noise and weight modifier reset bugs in the Triton
+  kernels.
 * LSTM state-dict handling and `AnalogConv1d` to/from digital conversion
   (#13).
 
