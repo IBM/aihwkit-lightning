@@ -11,7 +11,7 @@ dependencies = [
     "evaluate",
     "scipy",
     "scikit-learn",
-    "accelerate>=1.1.0",
+    "accelerate>=1.14.0",
     "aihwkit-lightning",
 ]
 
