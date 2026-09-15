@@ -37,7 +37,7 @@ training_args:
   save_strategy: steps
   save_total_limit: 1
   task_name: pretrain
-  warmup_ratio: 0.016
+  warmup_steps: 0.016
   weight_decay: 0.01
 
 rpu_config:

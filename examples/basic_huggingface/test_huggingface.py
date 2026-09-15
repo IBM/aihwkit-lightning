@@ -1,14 +1,6 @@
-# -*- coding: utf-8 -*-
-
-# (C) Copyright 2024 IBM. All Rights Reserved.
+# (C) Copyright 2026 IBM. All Rights Reserved.
 #
-# This code is licensed under the Apache License, Version 2.0. You may
-# obtain a copy of this license in the LICENSE.txt file in the root directory
-# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# Any modifications or derivative works of this code must retain this
-# copyright notice, and modified files need to carry a notice indicating
-# that they have been altered from the originals.
+# Licensed under the MIT license. See LICENSE file in the project root for details.
 
 # pylint: disable=too-many-locals, too-many-public-methods, no-member
 """Example to show huggingface compatibility."""
@@ -103,7 +95,7 @@ def training_huggingface(use_normal_torch: bool, use_fp16: bool):
             save_total_limit=1,
             seed=0,
             metric_for_best_model=metric_name,
-            warmup_ratio=0.06,
+            warmup_steps=0.06,  # float < 1 is a ratio of total steps (transformers v5)
             bf16=False,
             report_to="none",
             greater_is_better=True,

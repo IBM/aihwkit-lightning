@@ -8,7 +8,7 @@ dependencies = [
     "torch",
     "transformers",
     "datasets",
-    "accelerate>=1.1.0",
+    "accelerate>=1.14.0",
     "deepspeed",
     "wandb",
     "pyyaml",

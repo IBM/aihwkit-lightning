@@ -12,7 +12,8 @@ authors = [
   {name = "Julian Buechel", email = "jub@zurich.ibm.com"},
 ]
 maintainers = [
-  {name = "Julian Buechel", email = "jub@zurich.ibm.com"}
+  {name = "Manuel Le Gallo-Bourdeau", email = "anu@zurich.ibm.com"},
+  {name = "Pablo Carmona Gonzalez", email = "Pablo.Gonzalez3@ibm.com"}
 ]
 description = "IBM Analog Hardware Acceleration Kit - Lightning"
 readme = "README.md"
@@ -55,12 +56,12 @@ classifiers=[
 dev = [
     "mypy==1.20.2",
     "pylint==2.15.7",
-    "pycodestyle==2.11.1",
+    "pycodestyle==2.14.0",
     "black==26.5.1",
     "pytest",
 ]
 huggingface = [
-    "transformers>=4.20.0",
+    "transformers>=5.10.0",
     "datasets",
 ]
 triton = [
