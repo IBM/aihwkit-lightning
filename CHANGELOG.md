@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 * `Fixed` for any bug fixes.
 * `Security` in case of vulnerabilities.
 
-## [Unreleased]
+## [2.1.0] - 2026-09-15
 
 ### Added
 * `AnalogConv3d` layer. `torch.nn.Conv3d` modules are now converted by
@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog], and this project adheres to
 * `uv` project files, lockfiles and updated READMEs for the
   `basic_huggingface`, `deepspeed_and_huggingface` and `deepspeed_cifar10`
   examples.
+* `examples/aihwkit_evaluation`: example that converts a Lightning model to
+  AIHWKIT and evaluates it there, with a model summary and an evaluation
+  report. Referenced from the user guide (#25).
 
 ### Changed
 * `AnalogOptimizer` now takes a callable that returns the analog layers
@@ -39,6 +42,8 @@ The format is based on [Keep a Changelog], and this project adheres to
   (#77).
 * Maintainers updated to Manuel Le Gallo-Bourdeau and Pablo Carmona Gonzalez
   (#80).
+* Source file headers now reference the MIT license, matching `LICENSE.txt`
+  and the package metadata. They previously still cited Apache 2.0 (#79).
 * Read the Docs build moved to an Ubuntu LTS image and a Python version that
   matches the minimum requirement (#81).
 * CI workflow runs on Python 3.14 (#21), pins the Triton commit and
@@ -205,7 +210,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 * Initial version with `triton` mode.
 
 
-[Unreleased]: https://github.com/IBM/aihwkit-lightning/compare/v2.0.1...HEAD
+[2.1.0]: https://github.com/IBM/aihwkit-lightning/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/IBM/aihwkit-lightning/compare/v1.0.1...v2.0.1
 [1.0.1]: https://github.com/IBM/aihwkit-lightning/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/IBM/aihwkit-lightning/releases/tag/v1.0.0
