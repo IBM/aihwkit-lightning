@@ -55,7 +55,7 @@ classifiers=[
 [project.optional-dependencies]
 dev = [
     "mypy==1.20.2",
-    "pylint==2.15.7",
+    "pylint==4.0.8",
     "pycodestyle==2.14.0",
     "black==26.5.1",
     "pytest",
