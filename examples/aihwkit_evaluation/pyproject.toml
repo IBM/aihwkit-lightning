@@ -1,0 +1,13 @@
+[project]
+name = "aihwkit-evaluation-example"
+version = "0.1.0"
+description = "Example on how to evaluate an AIHWKIT-Lightning model with AIHWKIT"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "torch",
+    "aihwkit",
+    "aihwkit-lightning",
+]
+
+[tool.uv.sources]
+aihwkit-lightning = { path = "../..", editable = true }
