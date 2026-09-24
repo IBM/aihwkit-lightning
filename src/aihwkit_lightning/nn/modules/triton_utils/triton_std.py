@@ -324,10 +324,12 @@ if __name__ == "__main__":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: naive_per_slice_std(inp, upper_end_of_slices), quantiles=quantiles
             )
-        if provider == "triton":
+        elif provider == "triton":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: sliced_fast_std(inp, upper_end_of_slices), quantiles=quantiles
             )
+        else:
+            raise ValueError(f"Unknown provider {provider}")
         return time_ms, max_ms, min_ms
 
     benchmark.run(print_data=True, save_path="debug/sliced_std_perf")

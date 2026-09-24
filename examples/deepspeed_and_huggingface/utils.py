@@ -159,7 +159,7 @@ def create_parser():
     """Create the parser that expects the config yaml."""
     parser = argparse.ArgumentParser()
     group = parser.add_argument_group("Training Args")
-    group.add_argument("--config", dest="config", type=argparse.FileType(mode="r"))
+    group.add_argument("--config", dest="config", type=str)
     return parser
 
 
@@ -182,8 +182,8 @@ def parse_args(parser: argparse.ArgumentParser):
     """
     args = parser.parse_args()
     if hasattr(args, "config") and args.config:
-        data = yaml.load(args.config, Loader=PrettySafeLoader)
-        args.config = args.config.name
+        with open(args.config, encoding="utf-8") as config_file:
+            data = yaml.load(config_file, Loader=PrettySafeLoader)
         arg_dict = args.__dict__
         for key, value in data.items():
             if isinstance(value, dict):

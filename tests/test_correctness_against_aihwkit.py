@@ -144,7 +144,7 @@ def fixture_rpus(
             rpu_config.pre_post.input_range.dynamic = ir_dynamic
             rpu_config.pre_post.input_range.enable = ir_enable
         else:
-            raise Exception(f"Unknown rpu config type {rpu_config}.")
+            raise TypeError(f"Unknown rpu config type {rpu_config}.")
 
         rpu_config.forward.inp_res = inp_res
         rpu_config.forward.out_res = out_res

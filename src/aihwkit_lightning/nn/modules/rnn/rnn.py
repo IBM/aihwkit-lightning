@@ -27,7 +27,9 @@ from aihwkit_lightning.nn.modules.rnn.layers import AnalogRNNLayer, AnalogBidirR
 from aihwkit_lightning.simulator.configs import TorchInferenceRPUConfig
 from .layers import AnalogRNNLayer, AnalogBidirRNNLayer
 
-AnalogRNNCell = Union[AnalogVanillaRNNCell, AnalogLSTMCell, AnalogGRUCell]
+AnalogRNNCell = Union[  # pylint: disable=invalid-name
+    AnalogVanillaRNNCell, AnalogLSTMCell, AnalogGRUCell
+]
 
 
 class ModularRNN(Module):

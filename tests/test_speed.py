@@ -34,7 +34,7 @@ from aihwkit_lightning.simulator.configs import WeightNoiseInjectionType, Weight
 from aihwkit_lightning.optim import AnalogOptimizer
 
 
-TRITON_AVAIL = False
+TRITON_AVAIL = False  # pylint: disable=invalid-name
 try:
     import triton
 
@@ -43,7 +43,7 @@ try:
 
     if not is_at_least_volta_gpu():
         raise ImportError("GPU must at least be Volta")
-    TRITON_AVAIL = True
+    TRITON_AVAIL = True  # pylint: disable=invalid-name
 except ImportError:
     print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
 
@@ -237,7 +237,9 @@ def benchmark_linear_speed_and_peak_memory_of_fwd_bwd(
         aihwkit_linear.remap_analog_weights()
         aihwkit_linear = aihwkit_linear.to(device=device, dtype=dtype)
 
-        class AihwkitAnalogAdamW(AnalogOptimizerMixin, AdamW):
+        class AihwkitAnalogAdamW(  # pylint: disable=too-few-public-methods
+            AnalogOptimizerMixin, AdamW
+        ):
             """AIHWKIT AdamW optimizer."""
 
         aihwkit_optim = AihwkitAnalogAdamW(aihwkit_linear.parameters(), lr=0.0)
@@ -414,7 +416,9 @@ def benchmark_triton_implementation(max_input_size: int):
         aihwkit_layer.remap_analog_weights()
         aihwkit_layer = aihwkit_layer.to(dtype=dtype, device=device)
 
-        class AihwkitAnalogAdamW(AnalogOptimizerMixin, AdamW):
+        class AihwkitAnalogAdamW(  # pylint: disable=too-few-public-methods
+            AnalogOptimizerMixin, AdamW
+        ):
             """AIHWKIT AdamW optimizer."""
 
         aihwkit_optim = AihwkitAnalogAdamW(aihwkit_layer.parameters(), lr=0.0)
@@ -434,6 +438,8 @@ def benchmark_triton_implementation(max_input_size: int):
             time_ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: bench(layer, inp, lightning_optim), quantiles=quantiles
             )
+        else:
+            raise ValueError(f"Unknown provider {provider}")
         return time_ms, max_ms, min_ms
 
     save_path = f"debug/linear_performance_fwd_bwd_torch_vs_triton_max_input_size_{max_input_size}"
