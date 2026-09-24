@@ -48,7 +48,7 @@ requires-dist = [
     { name = "datasets", marker = "extra == 'huggingface'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.3.1" },
     { name = "pycodestyle", marker = "extra == 'dev'", specifier = "==2.15.0" },
-    { name = "pylint", marker = "extra == 'dev'", specifier = "==2.15.7" },
+    { name = "pylint", marker = "extra == 'dev'", specifier = "==2.17.7" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "torch", specifier = "==2.13.0" },
     { name = "tqdm" },
@@ -306,16 +306,16 @@ wheels = [
 
 [[package]]
 name = "astroid"
-version = "2.13.5"
+version = "2.15.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lazy-object-proxy" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/78/16/69bda7fee90014004cb914210a0a7c031d1d0569f135aefe839314dc0a8c/astroid-2.13.5.tar.gz", hash = "sha256:df164d5ac811b9f44105a72b8f9d5edfb7b5b2d7e979b04ea377a77b3229114a", size = 223813, upload-time = "2023-01-31T21:19:58.095Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/3d/c18b0854d0d2eb3aca20c149cff5c90e6b84a5366066768d98636f5045ed/astroid-2.15.8.tar.gz", hash = "sha256:6c107453dffee9055899705de3c9ead36e74119cee151e5a9aaf7f0b0e020a6a", size = 344362, upload-time = "2023-09-26T12:40:28.546Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/45/5639d34304a830ecd8baff28a586b3b046160aeff43510264bbb4fd93287/astroid-2.13.5-py3-none-any.whl", hash = "sha256:6891f444625b6edb2ac798829b689e95297e100ddf89dbed5a8c610e34901501", size = 273192, upload-time = "2023-01-31T21:19:55.928Z" },
+    { url = "https://files.pythonhosted.org/packages/16/b6/c0b5394ec6149e0129421f1a762b805e0e583974bc3cd65e3c7ce7c95444/astroid-2.15.8-py3-none-any.whl", hash = "sha256:1aa149fc5c6589e3d0ece885b4491acd80af4f087baafa3fb5203b113e68cd3c", size = 278329, upload-time = "2023-09-26T12:40:25.988Z" },
 ]
 
 [[package]]
@@ -2328,7 +2328,7 @@ wheels = [
 
 [[package]]
 name = "pylint"
-version = "2.15.7"
+version = "2.17.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "astroid" },
@@ -2340,9 +2340,9 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "tomlkit" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/56/81d13f29c39361c99c307e5b98bd8fc243db10089a16726d7cd80f843726/pylint-2.15.7.tar.gz", hash = "sha256:91e4776dbcb4b4d921a3e4b6fec669551107ba11f29d9199154a01622e460a57", size = 410985, upload-time = "2022-11-29T11:20:00.921Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/e9/21f9ce3e4b81eef011be070a29f8a5c193e2488ed8713a898baa4e8b3362/pylint-2.17.7.tar.gz", hash = "sha256:f4fcac7ae74cfe36bc8451e931d8438e4a476c20314b1101c458ad0f05191fad", size = 434994, upload-time = "2023-09-30T21:25:10.328Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/a2/60c34e79143148fd44ad1fe69e528ab4dc9760b1ea8fd3f79c31b73523ef/pylint-2.15.7-py3-none-any.whl", hash = "sha256:1d561d1d3e8be9dd880edc685162fbdaa0409c88b9b7400873c0cf345602e326", size = 509151, upload-time = "2022-11-29T11:19:58.577Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/49/cea450a83079445a84f16050e571a7c383d3f474b13c5caedfebd4e35def/pylint-2.17.7-py3-none-any.whl", hash = "sha256:27a8d4c7ddc8c2f8c18aa0050148f89ffc09838142193fdbe98f172781a3ff87", size = 537178, upload-time = "2023-09-30T21:25:07.527Z" },
 ]
 
 [[package]]
