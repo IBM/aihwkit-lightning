@@ -84,8 +84,8 @@ def sliced_fast_abs_max_kernel(  # pylint: disable=too-many-arguments
     max_row = min(min_row + BLOCK_SIZE_N_ROWS, n_rows)
 
     # create the pointer array used for loading
-    col_offs = (col_block_idx * BLOCK_SIZE_N_COLS + tl.arange(0, BLOCK_SIZE_N_COLS))
-    row_offs = (row_block_idx * BLOCK_SIZE_N_ROWS + tl.arange(0, BLOCK_SIZE_N_ROWS))
+    col_offs = col_block_idx * BLOCK_SIZE_N_COLS + tl.arange(0, BLOCK_SIZE_N_COLS)
+    row_offs = row_block_idx * BLOCK_SIZE_N_ROWS + tl.arange(0, BLOCK_SIZE_N_ROWS)
 
     ptrs = weights_ptr + (col_offs[:, None] * col_stride + row_offs[None, :] * row_stride)
     # shape: [BLOCK_SIZE_N_COLS, BLOCK_SIZE_N_ROWS]
@@ -191,8 +191,8 @@ def fast_abs_max_kernel(
     row_block_idx = pid % n_pid_rows
 
     # create the pointer array used for loading
-    col_offs = (col_block_idx * BLOCK_SIZE_N_COLS + tl.arange(0, BLOCK_SIZE_N_COLS))
-    row_offs = (row_block_idx * BLOCK_SIZE_N_ROWS + tl.arange(0, BLOCK_SIZE_N_ROWS))
+    col_offs = col_block_idx * BLOCK_SIZE_N_COLS + tl.arange(0, BLOCK_SIZE_N_COLS)
+    row_offs = row_block_idx * BLOCK_SIZE_N_ROWS + tl.arange(0, BLOCK_SIZE_N_ROWS)
 
     ptrs = weights_ptr + (col_offs[:, None] * col_stride + row_offs[None, :] * row_stride)
     # shape: [BLOCK_SIZE_N_COLS, BLOCK_SIZE_N_ROWS]
@@ -387,10 +387,12 @@ if __name__ == "__main__":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: bench(weights, upper_end_of_slices), quantiles=quantiles
             )
-        if provider == "triton":
+        elif provider == "triton":
             time_ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: sliced_fast_abs_max(weights, upper_end_of_slices), quantiles=quantiles
             )
+        else:
+            raise ValueError(f"Unknown provider {provider}")
         return time_ms, max_ms, min_ms
 
     benchmark.run(print_data=True, save_path="debug/sliced_abs_max_perf")
