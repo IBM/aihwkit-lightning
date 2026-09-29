@@ -5,6 +5,9 @@ name: Formatting and tests
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   formatting:
     runs-on: ubuntu-latest
