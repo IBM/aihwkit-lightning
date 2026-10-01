@@ -116,7 +116,7 @@ def get_ds_config(command_args: Namespace) -> dict:
     return ds_config
 
 
-class Net(nn.Module):
+class Net(nn.Module):  # pylint: disable=too-few-public-methods
     """Define the Convolution Neural Network."""
 
     def __init__(self):

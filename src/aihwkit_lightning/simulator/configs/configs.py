@@ -30,9 +30,7 @@ class TorchInferenceRPUConfig:
 
     # pylint: disable=too-many-instance-attributes
 
-    forward: IOParameters = field(
-        default_factory=IOParameters, metadata=dict(bindings_include=True)
-    )
+    forward: IOParameters = field(default_factory=IOParameters, metadata={"bindings_include": True})
     """Input-output parameter setting for the forward direction.
 
     This parameters govern the hardware definitions specifying analog

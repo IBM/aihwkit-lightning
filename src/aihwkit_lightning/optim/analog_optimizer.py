@@ -12,7 +12,7 @@ from torch.optim import Optimizer
 from aihwkit_lightning.nn import AnalogLayerBase
 
 
-class AnalogOptimizer(Optimizer):
+class AnalogOptimizer(Optimizer):  # pylint: disable=too-few-public-methods
     """Generic optimizer that wraps an existing ``Optimizer`` for analog inference.
 
     This class wraps an existing ``Optimizer``, customizing the optimization

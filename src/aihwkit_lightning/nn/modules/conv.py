@@ -96,7 +96,7 @@ def unfold3d(
     return unfolded
 
 
-TRITON_AVAIL = False
+TRITON_AVAIL = False  # pylint: disable=invalid-name
 try:
     from aihwkit_lightning.nn.modules.triton_utils.triton_linear import TritonLinear
 
@@ -104,7 +104,7 @@ try:
         # we are not in interpret mode
         if not is_at_least_volta_gpu():
             raise ImportError("GPU must at least be Volta")
-    TRITON_AVAIL = True
+    TRITON_AVAIL = True  # pylint: disable=invalid-name
 except ImportError:
     print("Could not import triton_utils.triton_linear. Using PyTorch variant.")
 except RuntimeError as e:

@@ -390,7 +390,7 @@ def matmul_kernel(
             # we just scale with abs-max of weight
             bound = bound_scale * out_bound * input_range.to(tl.float32)
             if out_quant:
-                alpha = (bound.to(tl.float32) * out_res)
+                alpha = bound.to(tl.float32) * out_res
                 per_slice_accumulator = per_slice_accumulator / tl.where(
                     alpha == 0.0, FLOAT32_TINY,
                     alpha

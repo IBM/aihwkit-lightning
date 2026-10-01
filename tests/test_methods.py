@@ -125,7 +125,7 @@ class ParetoQQuantizeLinear(Linear):
             real_weights, self.weight_clip_val, self.w_bits, self.skip_rounding
         ).to(inp.dtype)
 
-        out = F.linear(inp, weight)
+        out = F.linear(inp, weight)  # pylint: disable=not-callable
         if self.bias is not None:
             out += self.bias.view(1, -1).expand_as(out)
 
