@@ -20,7 +20,10 @@ class CustomTrainer(Trainer):  # pylint: disable=too-few-public-methods
 
     # overwriting for clipping the weights
     def training_step(
-        self, model: torch.nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]
+        self,
+        model: torch.nn.Module,
+        inputs: Dict[str, Union[torch.Tensor, Any]],
+        num_items_in_batch: Union[torch.Tensor, int, None] = None,
     ) -> torch.Tensor:
         """
         Perform a training step on a batch of inputs.
@@ -28,6 +31,7 @@ class CustomTrainer(Trainer):  # pylint: disable=too-few-public-methods
         Args:
             model: The model to train.
             inputs: The inputs for for the training step.
+            num_items_in_batch: Number of items in the batch, used for loss normalization.
         Return:
             `torch.Tensor`: The tensor with training loss on this batch.
         """
@@ -35,7 +39,7 @@ class CustomTrainer(Trainer):  # pylint: disable=too-few-public-methods
         model.train()
         inputs = self._prepare_inputs(inputs)
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
         del inputs
         torch.cuda.empty_cache()
         if self.args.n_gpu > 1:

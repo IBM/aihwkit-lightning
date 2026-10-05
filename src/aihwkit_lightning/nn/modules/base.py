@@ -135,15 +135,13 @@ class AnalogLayerBase:
             )
             # needed for the fast mode
             self.register_buffer(  # type: ignore[call-arg]
-                "x_min", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
+                "x_min", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device) - 1e-5
             )
             self.register_buffer(  # type: ignore[call-arg]
-                "x_max", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device)
+                "x_max", tensor=zeros((len(self.in_sizes),), dtype=dtype, device=device) + 1e-5
             )
             self.x_min: Tensor
-            self.x_min -= 1e-5
             self.x_max: Tensor
-            self.x_max += 1e-5
         else:
             self.input_range = None  # type: ignore
             self.input_range_update_idx = None
