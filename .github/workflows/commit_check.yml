@@ -134,7 +134,7 @@ jobs:
         which python  # conda
         which pip
 
-        pip install torch==2.13.0 torchvision==0.28.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
         # Check disk space before triton installation
         echo "=== Disk space before triton installation ==="
@@ -171,9 +171,8 @@ jobs:
         pwd
         git clone https://github.com/IBM/aihwkit.git
         cd aihwkit
-        git checkout ee8bbf066f1c2a38b4a50f60c357a5581b33e916
-        pip install -r requirements.txt
-        pip install -r requirements-dev.txt
+        pip install -e .
+        pip install -e ".[dev]"
         conda install -c conda-forge openblas -y
         make build_inplace
         export PYTHONPATH=$(pwd)/src

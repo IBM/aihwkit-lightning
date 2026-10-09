@@ -862,6 +862,18 @@ def test_backward(
     # the gradients would be exactly the same. we don't apply scaling and
     # re-scaling of the inputs and outputs
     no_check = inp.abs() == inp.abs().amax(-1, keepdim=True)
+    # aihwkit simulator/tiles/analog_mvm.py l. 316 clamps the quantized input inside
+    # the autograd graph. Since torch 2.14, clamp has a zero gradient for elements
+    # lying exactly on the bound, so inputs that are quantized to +-input_range get
+    # a zero gradient in AIHWKIT. We pass the gradient through, so don't check these.
+    if rpu.forward.inp_res > 0:
+        inp_res = rpu.forward.inp_res
+        step = 2.0 * (1 / inp_res if inp_res > 1.0 else inp_res)
+        if rpu.pre_post.input_range.dynamic:
+            input_range = inp.abs().amax(-1, keepdim=True)
+        else:
+            input_range = linear.input_range.detach()
+        no_check |= (inp / input_range).abs() >= 1.0 - step / 2 - 1e-6
     assert allclose(
         inp_aihwkit.grad[~no_check], inp.grad[~no_check], atol=atol
     ), "grad w.r.t. the input not matching"
