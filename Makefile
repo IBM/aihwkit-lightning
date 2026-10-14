@@ -18,3 +18,6 @@ pytest:
 
 black:
 	git ls-files | grep \.py$$ | xargs black -t py310 -C --config .black
+
+clean:
+	rm -rf .mypy_cache .pytest_cache ./**/*.egg-info ./**/__pycache__
