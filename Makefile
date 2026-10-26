@@ -17,7 +17,7 @@ pytest:
 	TRITON_INTERPRET=1 TRITON_CPU_BACKEND=1 pytest -v -s tests/
 
 black:
-	git ls-files | grep \.py$$ | xargs black -t py310 -C --config .black
+	git ls-files | grep \.py$$ | xargs black -t py312 -C --config .black
 
 clean:
 	rm -rf .mypy_cache .pytest_cache ./**/*.egg-info ./**/__pycache__

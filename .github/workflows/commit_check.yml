@@ -26,7 +26,7 @@ jobs:
       run: |
         pip install --upgrade pip
         pip install uv
-        uv venv --python 3.10.17
+        uv venv --python 3.12
         uv pip install -e ".[dev]" --torch-backend=auto
     - name: Pytest
       run: |
@@ -115,7 +115,7 @@ jobs:
     - name: Create conda environment
       run: |
         export PATH="$HOME/miniconda/bin:$PATH"
-        conda create -n myenv python=3.10 -y
+        conda create -n myenv python=3.12 -y
         conda info --envs
 
     - name: Install dependencies
