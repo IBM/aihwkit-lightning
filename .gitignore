@@ -169,4 +169,8 @@ cython_debug/
 .\#*
 *~
 
+# AI tools
 .claude
+.codex
+CLAUDE.md
+AGENT.md
