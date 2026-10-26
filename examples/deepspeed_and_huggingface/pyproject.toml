@@ -2,7 +2,7 @@
 name = "deepspeed-huggingface-example"
 version = "0.1.0"
 description = "Example on how to use AIHWKIT-Lightning with DeepSpeed and HuggingFace"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "numpy",
     "torch",

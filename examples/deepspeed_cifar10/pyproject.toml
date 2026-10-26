@@ -2,7 +2,7 @@
 name = "deepspeed-cifar10-example"
 version = "0.1.0"
 description = "Example on how to use AIHWKIT-Lightning with DeepSpeed on CIFAR-10"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "torch",
     "torchvision",
