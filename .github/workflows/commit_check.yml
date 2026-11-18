@@ -181,7 +181,8 @@ jobs:
 
         # aihwkit-lightning
         cd aihwkit-lightning
-        pip install -r requirements_dev.txt
+        pip install -e ".[dev]"
+        pip install -e ".[huggingface]"
         pip install -v -e .
 
         # actually execute the tests

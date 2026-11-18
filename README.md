@@ -119,7 +119,7 @@ For bug-fixes, please follow the instructions below.
 
 Install the development requirements.
 ```bash
-pip install -r requirements_dev.txt
+pip install -e ".[dev]"
 mypy --install-types
 ```
 Create a fork from the `main` branch and make a well-documented PR. Make sure to run the following before submitting the PR:
